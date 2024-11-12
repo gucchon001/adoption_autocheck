@@ -1,0 +1,978 @@
+# Merged Python Files
+
+# Directory Structure
+
+script_to_merge-master/
+    check_refactoring.py
+    generate_detailed_spec.py
+    generate_spec.py
+    logging_config.py
+    main.py
+    merge_files.py
+    utils.py
+    .gitignore
+    .req_hash
+    debug_log.txt
+    hash.txt
+    pip_version.txt
+    requirements.txt
+    run.bat
+    settings.ini
+    __pycache__/
+        (skipped directory contents)
+    document/
+        (skipped directory contents)
+    log/
+    myenv/
+        (skipped directory contents)
+
+================================================================================
+
+================================================================================
+File: check_refactoring.py
+================================================================================
+
+import os
+import logging
+from typing import Optional, Dict, List
+from openai import OpenAI
+from utils import read_settings, read_file_safely, write_file_content
+
+# モジュール固有のロガーを設定
+logger = logging.getLogger(__name__)
+
+class RefactoringChecker:
+    """コードのリファクタリング提案を管理するクラス"""
+
+    def __init__(self):
+        """設定を読み込んで初期化"""
+        try:
+            self.settings = read_settings()
+            self.model = self.settings['openai_model']        # キー名を変更
+            self.temperature = float(0.7)  # 固定値として設定
+            self.output_dir = os.path.join(self.settings['source_directory'], 'document')  # 出力ディレクトリのパスを修正
+            
+            # OpenAIクライアントを初期化
+            self.client = OpenAI(api_key=self.settings['openai_api_key'])
+            
+            logger.info("RefactoringChecker initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize RefactoringChecker: {e}")
+            raise
+
+    def _read_merge_file(self) -> Optional[str]:
+        """マージされたファイルを読み込む"""
+        try:
+            merge_path = os.path.join(self.output_dir, 'merge.txt')
+            content = read_file_safely(merge_path)
+            if content is None:
+                logger.error("Failed to read merge.txt")
+                return None
+            logger.info("Successfully read merge.txt")
+            return content
+        except Exception as e:
+            logger.error(f"Error reading merge file: {e}")
+            return None
+
+    def _generate_prompt(self, code_content: str) -> str:
+        """AIに送信するプロンプトを生成"""
+        return f"""以下のPythonコードに対するリファクタリング提案を行ってください。
+以下の観点から分析し、具体的な改善提案を日本語で作成してください：
+
+1. 単一責任原則に基づいた責任の分離
+2. 関数の重複
+3. 未使用の関数
+4. 外部ファイルからの読み込み該当の関数
+5. 過度なエラーログの抑制
+
+提案は以下の形式で出力してください：
+
+リファクタリング提案:
+以下に各観点に基づいたリファクタリング提案を示します。
+
+### 1. 単一責任原則に基づいた責任の分離
+[具体的な提案内容]
+
+### 2. 関数の重複
+[具体的な提案内容]
+
+### 3. 未使用の関数
+[具体的な提案内容]
+
+### 4. 外部ファイルからの読み込み該当の関数
+[具体的な提案内容]
+
+### 5. 過度なエラーログの抑制
+[具体的な提案内容]
+
+コード：
+{code_content}"""
+
+    def _get_ai_response(self, prompt: str) -> Optional[str]:
+        """OpenAI APIを使用してリファクタリング提案を生成"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "あなたは経験豊富なソフトウェアエンジニアです。"
+                                 "コードの品質を分析し、具体的で実践的なリファクタリング提案を提供することができます。"
+                                 "SOLID原則やクリーンコードの原則に基づいた改善提案を行います。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.temperature
+            )
+            logger.info("Successfully received AI response")
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error getting AI response: {e}")
+            return None
+
+    def generate_suggestions(self) -> Optional[str]:
+        """リファクタリング提案を生成してファイルに保存"""
+        try:
+            # マージファイルを読み込み
+            code_content = self._read_merge_file()
+            if not code_content:
+                return None
+
+            # プロンプトを生成
+            prompt = self._generate_prompt(code_content)
+            
+            # AI応答を取得
+            suggestions = self._get_ai_response(prompt)
+            if not suggestions:
+                return None
+
+            # リファクタリング提案を保存
+            output_path = os.path.join(self.output_dir, 'check_refactoring.txt')
+            if write_file_content(output_path, suggestions):
+                logger.info(f"Successfully wrote refactoring suggestions to {output_path}")
+                return output_path
+            return None
+
+        except Exception as e:
+            logger.error(f"Error generating refactoring suggestions: {e}")
+            return None
+
+    def validate_suggestions(self, suggestions_path: str) -> bool:
+        """生成されたリファクタリング提案の妥当性を検証"""
+        try:
+            content = read_file_safely(suggestions_path)
+            if not content:
+                logger.error("Generated refactoring suggestions are empty")
+                return False
+
+            # 必要なセクションの存在を確認
+            required_sections = [
+                "リファクタリング提案:",
+                "### 1. 単一責任原則に基づいた責任の分離",
+                "### 2. 関数の重複",
+                "### 3. 未使用の関数",
+                "### 4. 外部ファイルからの読み込み該当の関数",
+                "### 5. 過度なエラーログの抑制"
+            ]
+
+            for section in required_sections:
+                if section not in content:
+                    logger.error(f"Missing required section: {section}")
+                    return False
+
+            logger.info("Refactoring suggestions validation successful")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error validating refactoring suggestions: {e}")
+            return False
+
+def generate_refactoring_suggestions() -> Optional[str]:
+    """既存のコードとの互換性のための関数"""
+    try:
+        checker = RefactoringChecker()
+        suggestions_path = checker.generate_suggestions()
+        
+        if suggestions_path and checker.validate_suggestions(suggestions_path):
+            logger.info("Refactoring check completed successfully")
+            return suggestions_path
+        else:
+            logger.error("Refactoring check failed or validation failed")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error in refactoring check: {e}")
+        return None
+
+def main():
+    return generate_refactoring_suggestions() is not None
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+File: generate_detailed_spec.py
+================================================================================
+
+import os
+import logging
+from typing import Optional, Dict, List, Tuple
+from openai import OpenAI
+from utils import read_settings, read_file_safely, write_file_content
+
+# モジュール固有のロガーを設定
+logger = logging.getLogger(__name__)
+
+class DetailedSpecificationGenerator:
+    """詳細仕様書生成を管理するクラス"""
+
+    def __init__(self):
+        """設定を読み込んで初期化"""
+        try:
+            self.settings = read_settings()
+            self.model = self.settings['openai_model']
+            self.temperature = float(0.7)  # 固定値として設定
+            self.source_dir = self.settings['source_directory']
+            self.output_dir = os.path.join(self.source_dir, 'document')
+            
+            # OpenAIクライアントを初期化
+            self.client = OpenAI(api_key=self.settings['openai_api_key'])
+            
+            logger.info("DetailedSpecificationGenerator initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize DetailedSpecificationGenerator: {e}")
+            raise
+
+    def _read_input_files(self) -> Optional[Tuple[str, str]]:
+        """必要な入力ファイルを読み込む"""
+        try:
+            # merge.txtの読み込み
+            merge_path = os.path.join(self.output_dir, 'merge.txt')
+            merge_content = read_file_safely(merge_path)
+            if merge_content is None:
+                logger.error("Failed to read merge.txt")
+                return None
+
+            # requirements_spec.txtの読み込み
+            spec_path = os.path.join(self.output_dir, 'requirements_spec.txt')
+            spec_content = read_file_safely(spec_path)
+            if spec_content is None:
+                logger.error("Failed to read requirements_spec.txt")
+                return None
+
+            logger.info("Successfully read both input files")
+            return merge_content, spec_content
+
+        except Exception as e:
+            logger.error(f"Error reading input files: {e}")
+            return None
+
+    def _generate_prompt(self, merge_content: str, spec_content: str) -> str:
+        """AIに送信するプロンプトを生成"""
+        return f"""以下の機能要件仕様書とソースコードを基に、より詳細なプログラム仕様書を作成してください。
+出力は以下の形式に従い、具体的な実装詳細、データフロー、各モジュールの相互作用を含めてください：
+
+# プログラム仕様書
+
+## 1. システム概要
+[システムの詳細な説明と全体アーキテクチャ]
+
+## 2. ファイルごとの役割と詳細説明
+[各ファイルの具体的な役割、機能、依存関係]
+
+## 3. 関数ごとの役割と詳細説明
+[各関数の入出力、処理内容、エラーハンドリング]
+
+## 4. 非機能要件
+[具体的な性能要件、セキュリティ要件、その他の技術要件]
+
+## 5. 技術要件
+[必要なライブラリのバージョン、環境設定、依存関係]
+
+## 6. 使用手順と注意事項
+[セットアップ手順、使用方法、既知の制限事項]
+
+機能要件仕様書：
+{spec_content}
+
+ソースコード：
+{merge_content}"""
+
+    def _get_ai_response(self, prompt: str) -> Optional[str]:
+        """OpenAI APIを使用して詳細仕様書を生成"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "あなたは優秀なソフトウェアアーキテクトです。コードと仕様書を解析して、"
+                                 "実装の詳細まで踏み込んだ包括的なプログラム仕様書を作成することができます。"
+                    },
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.temperature
+            )
+            logger.info("Successfully received AI response")
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"Error getting AI response: {e}")
+            return None
+
+    def generate(self) -> Optional[str]:
+        """詳細仕様書を生成してファイルに保存"""
+        try:
+            # 入力ファイルを読み込み
+            input_contents = self._read_input_files()
+            if not input_contents:
+                return None
+                
+            merge_content, spec_content = input_contents
+
+            # プロンプトを生成
+            prompt = self._generate_prompt(merge_content, spec_content)
+            
+            # AI応答を取得
+            specification = self._get_ai_response(prompt)
+            if not specification:
+                return None
+
+            # 詳細仕様書を保存
+            output_path = os.path.join(self.output_dir, 'detailed_program_spec.txt')
+            if write_file_content(output_path, specification):
+                logger.info(f"Successfully wrote detailed specification to {output_path}")
+                return output_path
+            return None
+
+        except Exception as e:
+            logger.error(f"Error generating detailed specification: {e}")
+            return None
+
+    def validate_specification(self, spec_path: str) -> bool:
+        """生成された詳細仕様書の妥当性を検証"""
+        try:
+            content = read_file_safely(spec_path)
+            if not content:
+                logger.error("Generated detailed specification is empty")
+                return False
+
+            # 必要なセクションの存在を確認
+            required_sections = [
+                "# プログラム仕様書",
+                "## 1. システム概要",
+                "## 2. ファイルごとの役割と詳細説明",
+                "## 3. 関数ごとの役割と詳細説明",
+                "## 4. 非機能要件",
+                "## 5. 技術要件",
+                "## 6. 使用手順と注意事項"
+            ]
+
+            for section in required_sections:
+                if section not in content:
+                    logger.error(f"Missing required section: {section}")
+                    return False
+
+            logger.info("Detailed specification validation successful")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error validating detailed specification: {e}")
+            return False
+
+def generate_detailed_specification() -> Optional[str]:
+    """既存のコードとの互換性のための関数"""
+    try:
+        generator = DetailedSpecificationGenerator()
+        spec_path = generator.generate()
+        
+        if spec_path and generator.validate_specification(spec_path):
+            logger.info("Detailed specification generation completed successfully")
+            return spec_path
+        else:
+            logger.error("Detailed specification generation failed or validation failed")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error in detailed specification generation: {e}")
+        return None
+
+def main():
+    return generate_detailed_specification() is not None
+
+if __name__ == "__main__":
+    main()
+
+
+================================================================================
+File: generate_spec.py
+================================================================================
+
+import os
+import logging
+from typing import Optional
+from openai import OpenAI
+from utils import read_settings, read_file_safely, write_file_content
+
+# ロガーの設定
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+
+class SpecificationGenerator:
+    """仕様書生成を管理するクラス"""
+
+    def __init__(self):
+        """設定を読み込んで初期化"""
+        try:
+            config = read_settings()
+            # APIセクションから設定を読み込む
+            self.api_key = config.get('openai_api_key', '')  # 設定キーを変更
+            self.model = config.get('openai_model', 'gpt-4')  # 設定キーを変更
+            self.temperature = 0.7  # デフォルト値として設定
+            
+            # ソースディレクトリの設定
+            self.source_dir = config.get('source_directory', '.')
+            self.document_dir = os.path.join(self.source_dir, 'document')
+
+            # OpenAIクライアントを初期化
+            self.client = OpenAI(api_key=self.api_key)
+
+            logger.debug(f"SpecificationGenerator initialized with model: {self.model}")
+        except KeyError as e:
+            logger.error(f"設定ファイルに必要なキーがありません: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"SpecificationGeneratorの初期化に失敗しました: {e}")
+            raise
+
+    def generate(self) -> str:
+        """仕様書を生成してファイルに保存"""
+        try:
+            code_content = self._read_merge_file()
+            if not code_content:
+                logger.error("コード内容が空です。")
+                return ""
+
+            prompt = self._generate_prompt(code_content)
+            specification = self._get_ai_response(prompt)
+            if not specification:
+                return ""
+
+            # 出力先をdocumentフォルダに設定
+            output_path = os.path.join(self.document_dir, 'requirements_spec.txt')
+            if write_file_content(output_path, specification):
+                logger.info(f"仕様書が正常に出力されました: {output_path}")
+                return output_path
+            return ""
+        except Exception as e:
+            logger.error(f"仕様書生成中にエラーが発生しました: {e}")
+            return ""
+
+    def _read_merge_file(self) -> str:
+        """merge.txt ファイルの内容を読み込む"""
+        merge_path = os.path.join(self.document_dir, 'merge.txt')
+        content = read_file_safely(merge_path)
+        if content:
+            logger.info("merge.txt の読み込みに成功しました。")
+        else:
+            logger.error("merge.txt の読み込みに失敗しました。")
+        return content or ""
+
+    def _generate_prompt(self, code_content: str) -> str:
+        """AIに送信するプロンプトを生成"""
+        return f"""以下のPythonコードを解析して、日本語で機能要件仕様書を作成してください。
+# AIチャットアプリケーション機能要件仕様書
+## 1. システム概要
+## 2. 主要機能要件
+## 3. 非機能要件
+## 4. 技術要件
+
+コード:
+{code_content}"""
+
+    def _get_ai_response(self, prompt: str) -> str:
+        """OpenAI APIを使用して仕様書を生成"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": "あなたは仕様書を作成するAIです。"},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=self.temperature
+            )
+            logger.info("AI応答の取得に成功しました。")
+            return response.choices[0].message.content
+        except Exception as e:
+            logger.error(f"AI応答取得中にエラーが発生しました: {e}")
+            return ""
+
+def generate_specification() -> str:
+    """generate_specification 関数"""
+    generator = SpecificationGenerator()
+    return generator.generate()
+
+if __name__ == "__main__":
+    generate_specification()
+
+
+================================================================================
+File: logging_config.py
+================================================================================
+
+import os
+import logging
+from datetime import datetime
+from utils import read_settings
+
+def setup_logging(debug_mode: bool = False):
+    """アプリケーション全体のロギング設定
+
+    Args:
+        debug_mode (bool): Trueの場合、ログレベルをDEBUGに設定。Falseの場合はINFO
+    """
+    try:
+        # 設定ファイルから source_directory を取得
+        settings = read_settings()
+        source_dir = settings.get('source_directory', os.getcwd())
+        
+        # ログフォルダを作成（プロジェクトのルートディレクトリ直下）
+        log_dir = os.path.join(source_dir, 'log')
+        os.makedirs(log_dir, exist_ok=True)
+
+        # ログファイルのパス
+        log_file = os.path.join(log_dir, 'application.log')
+
+        # 既存のハンドラを削除（重複を防ぐ）
+        for handler in logging.root.handlers[:]:
+            logging.root.removeHandler(handler)
+
+        # ログレベルの設定
+        log_level = logging.DEBUG if debug_mode else logging.INFO
+
+        # 基本設定
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                # コンソール出力用ハンドラ
+                logging.StreamHandler(),
+                # ファイル出力用ハンドラ
+                logging.FileHandler(log_file, encoding='utf-8', mode='a')
+            ]
+        )
+
+        # 実行開始のログを記録
+        logging.info("="*50)
+        logging.info(f"Application started at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        logging.info(f"Log Level: {'DEBUG' if debug_mode else 'INFO'}")
+        logging.info(f"Log Directory: {log_dir}")
+        logging.info("="*50)
+
+    except Exception as e:
+        print(f"ログ設定中にエラーが発生しました: {e}")
+        # 最低限のログ設定
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
+        logging.error(f"Failed to setup logging: {e}")
+
+
+================================================================================
+File: main.py
+================================================================================
+
+import os
+import sys
+import traceback
+from merge_files import merge_py_files
+from generate_spec import generate_specification
+from generate_detailed_spec import generate_detailed_specification
+from check_refactoring import generate_refactoring_suggestions
+from logging_config import setup_logging
+import logging
+import argparse
+
+logger = logging.getLogger(__name__)
+
+def main():
+    try:
+        # コマンドライン引数の解析
+        parser = argparse.ArgumentParser(description='Python Files Processor')
+        parser.add_argument('--debug', action='store_true', help='デバッグモードを有効化')
+        args = parser.parse_args()
+
+        # ロギング設定を初期化
+        setup_logging(debug_mode=args.debug)
+        logger.info("Application started")
+        
+        functions = {
+            "1": lambda: (merge_py_files(), generate_specification(), 
+                         generate_detailed_specification(), generate_refactoring_suggestions()),
+            "2": merge_py_files,
+            "3": generate_specification,
+            "4": generate_detailed_specification,
+            "5": generate_refactoring_suggestions
+        }
+        
+        print("実行したい機能を選択してください:")
+        print("1. 全てを順に実行")
+        print("2. merge.txt の生成")
+        print("3. 仕様書の作成")
+        print("4. 詳細なプログラム仕様書の作成")
+        print("5. リファクタリングチェック")
+        
+        choice = input("選択 (1, 2, 3, 4 または 5): ").strip()
+        logger.debug(f"選択された機能: {choice}")
+        
+        if choice in functions:
+            try:
+                logger.info(f"機能{choice}の実行開始")
+                result = functions[choice]()
+                logger.info(f"機能{choice}の実行完了")
+                print("\n処理が正常に完了しました。")
+                if result:
+                    print(f"処理結果: {result}")
+            except Exception as e:
+                error_info = traceback.format_exc()
+                logger.error(f"Error during execution: {str(e)}\n{error_info}")
+                print(f"エラーが発生しました: {e}")
+        else:
+            print("無効な選択です。")
+            
+    except Exception as e:
+        error_info = traceback.format_exc()
+        logger.error(f"Critical error: {str(e)}\n{error_info}")
+        print(f"重大なエラーが発生しました: {e}")
+
+if __name__ == "__main__":
+    logger.debug(f"Pythonバージョン: {sys.version}")
+    logger.debug(f"実行パス: {os.path.abspath(__file__)}")
+    main()
+
+
+================================================================================
+File: merge_files.py
+================================================================================
+
+#merge_files.py
+from typing import Optional, List
+import logging
+import os
+import fnmatch
+import configparser
+import utils
+
+# モジュールレベルのロガー設定
+logger = logging.getLogger(__name__)
+
+class PythonFileMerger:
+    def __init__(self, settings_path: str = 'settings.ini'):
+        """INI設定を読み込んでマージャーを初期化"""
+        try:
+            self.settings = utils.read_settings(settings_path)
+            self.project_dir = os.path.abspath(self.settings['source_directory'])
+            
+            # 出力ディレクトリを設定（documentフォルダ）
+            self.output_dir = os.path.join(self.project_dir, 'document')
+            self.output_filename = self.settings['output_file']
+            
+            # documentディレクトリが存在しない場合は作成
+            if not os.path.exists(self.output_dir):
+                os.makedirs(self.output_dir)
+            
+            # 除外パターンをリストに変換
+            self.exclude_patterns = [
+                pattern.strip() for pattern in self.settings['exclusions'].split(',')
+                if pattern.strip()
+            ]
+            
+            # ログ出力
+            logger.info(f"Initialized with project_dir: {self.project_dir}")
+            logger.info(f"Output directory: {self.output_dir}")
+            logger.info(f"Output file: {os.path.join(self.output_dir, self.output_filename)}")
+            logger.info(f"Exclude patterns: {self.exclude_patterns}")
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize PythonFileMerger: {str(e)}")
+            raise
+
+    def _should_exclude(self, path: str) -> bool:
+        """パスが除外パターンに一致するかチェック"""
+        try:
+            name = os.path.basename(path)
+            path_parts = path.split(os.sep)
+            
+            for pattern in self.exclude_patterns:
+                pattern = pattern.strip()
+                if any(fnmatch.fnmatch(part, pattern) for part in path_parts):
+                    return True
+                if fnmatch.fnmatch(name, pattern):
+                    return True
+            return False
+        except Exception as e:
+            logger.error(f"Error in _should_exclude for path {path}: {str(e)}")
+            return True
+
+    def _get_directory_structure(self, startpath: str) -> str:
+        """ディレクトリ構造を文字列として取得"""
+        try:
+            tree_str = "# Directory Structure\n\n"
+            
+            # ルートディレクトリ名を表示
+            tree_str += f"{os.path.basename(startpath)}/\n"
+            
+            root_files = []
+            sub_dirs = []
+            
+            # ルートディレクトリのファイルとサブディレクトリを収集
+            for item in sorted(os.listdir(startpath)):
+                item_path = os.path.join(startpath, item)
+                if os.path.isfile(item_path):
+                    root_files.append(item)
+                elif os.path.isdir(item_path):
+                    sub_dirs.append(item)
+            
+            # ルートディレクトリのファイルを表示（Pythonファイルを先に）
+            python_files = sorted(f for f in root_files if f.endswith('.py'))
+            other_files = sorted(f for f in root_files if not f.endswith('.py'))
+            
+            for f in python_files + other_files:
+                tree_str += f"    {f}\n"
+            
+            # サブディレクトリを処理
+            for dirname in sorted(sub_dirs):
+                dirpath = os.path.join(startpath, dirname)
+                tree_str += f"    {dirname}/\n"
+                
+                # 除外対象のディレクトリの場合
+                if self._should_exclude(dirpath):
+                    tree_str += "        (skipped directory contents)\n"
+                    continue
+                
+                # 除外対象でない場合はPythonファイルを表示
+                python_files = []
+                for root, _, files in os.walk(dirpath):
+                    if root == dirpath:  # 直接の子ファイルのみを処理
+                        python_files.extend(
+                            f for f in sorted(files)
+                            if f.endswith('.py') and not self._should_exclude(os.path.join(root, f))
+                        )
+                
+                for f in python_files:
+                    tree_str += f"        {f}\n"
+            
+            return f"{tree_str}\n{'=' * 80}\n"
+                
+        except Exception as e:
+            logger.error(f"Error in _get_directory_structure: {str(e)}")
+            return "# Error generating directory structure\n\n"
+
+    def _format_file_content(self, filename: str, content: str) -> str:
+        """ファイル内容のフォーマット"""
+        separator = "=" * 80
+        return f"""
+{separator}
+File: {filename}
+{separator}
+
+{content}
+
+"""
+
+    def process(self) -> Optional[str]:
+        """ファイルマージ処理を実行"""
+        try:
+            # Pythonファイルを収集（除外パターンを考慮）
+            python_files = utils.get_python_files(self.project_dir, self.exclude_patterns)
+            
+            if not python_files:
+                logger.warning(f"No Python files found in {self.project_dir}")
+                return None
+
+            logger.info(f"Found {len(python_files)} Python files to process")
+            
+            # ディレクトリ構造を追加
+            merged_content = "# Merged Python Files\n\n"
+            merged_content += self._get_directory_structure(self.project_dir)
+            
+            # ファイル内容を追加
+            processed_count = 0
+            total_files = len(python_files)
+            
+            for rel_path, filepath in sorted(python_files):
+                content = utils.read_file_safely(filepath)
+                if content is not None:
+                    formatted_content = self._format_file_content(rel_path, content)
+                    merged_content += formatted_content
+                    processed_count += 1
+                else:
+                    logger.warning(f"Skipped file due to read error: {rel_path}")
+
+            output_path = os.path.join(self.output_dir, self.output_filename)
+            logger.info(f"Writing output to: {os.path.abspath(output_path)}")
+            
+            # UTF-8でファイルを書き込み
+            try:
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(merged_content)
+                logger.info(f"Successfully wrote merged content to {output_path}")
+                return output_path
+            except Exception as e:
+                logger.error(f"Failed to write output file: {str(e)}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Error during file merge operation: {str(e)}")
+            return None
+
+def merge_py_files() -> Optional[str]:
+    """マージ処理のエントリーポイント"""
+    try:
+        logger.info("Starting Python files merge process")
+        merger = PythonFileMerger()
+        merged_file_path = merger.process()
+        
+        if merged_file_path:
+            logger.info(f"File merge completed successfully. Output file: {os.path.abspath(merged_file_path)}")
+            return merged_file_path
+        else:
+            logger.error("File merge failed")
+            return None
+            
+    except Exception as e:
+        logger.error(f"Error in merge operation: {str(e)}")
+        return None
+
+
+================================================================================
+File: utils.py
+================================================================================
+
+import os
+import logging
+import fnmatch
+import configparser
+from typing import List, Tuple, Optional, Dict
+
+logger = logging.getLogger(__name__)
+
+def normalize_path(path: str) -> str:
+    """パスを正規化"""
+    return os.path.normpath(path).replace('\\', '/')
+
+def read_settings(settings_path: str = 'settings.ini') -> dict:
+    """設定ファイルを読み込む"""
+    try:
+        config = configparser.ConfigParser()
+        
+        # デフォルト設定
+        default_settings = {
+            'source_directory': '.',
+            'output_file': 'merge.txt',
+            'exclusions': 'myenv,*__pycache__*,sample_file,*.log',
+            'openai_api_key': '',
+            'openai_model': 'gpt-4'
+        }
+        
+        if os.path.exists(settings_path):
+            config.read(settings_path, encoding='utf-8')
+            settings = {
+                'source_directory': config['DEFAULT'].get('SourceDirectory', default_settings['source_directory']),
+                'output_file': config['DEFAULT'].get('OutputFile', default_settings['output_file']),
+                'exclusions': config['DEFAULT'].get('Exclusions', default_settings['exclusions']).replace(' ', '')
+            }
+            
+            # APIセクションの設定を読み込む
+            if 'API' in config:
+                settings['openai_api_key'] = config['API'].get('openai_api_key', default_settings['openai_api_key'])
+                settings['openai_model'] = config['API'].get('openai_model', default_settings['openai_model'])
+            else:
+                logger.warning("API section not found in settings.ini")
+                settings.update({
+                    'openai_api_key': default_settings['openai_api_key'],
+                    'openai_model': default_settings['openai_model']
+                })
+        else:
+            logger.warning(f"Settings file not found at {settings_path}, using default settings")
+            settings = default_settings
+        
+        # APIキーの存在確認
+        if not settings['openai_api_key']:
+            logger.error("OpenAI API key is not set in settings.ini")
+        
+        return settings
+    except Exception as e:
+        logger.error(f"Error reading settings file {settings_path}: {str(e)}")
+        return default_settings
+
+def write_file_content(filepath: str, content: str) -> bool:
+    """ファイルに内容を書き込む"""
+    try:
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write(content)
+        return True
+    except Exception as e:
+        logger.error(f"Error writing to file {filepath}: {str(e)}")
+        return False
+
+def read_file_safely(filepath: str) -> Optional[str]:
+    """ファイルを安全に読み込む"""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            content = f.read()
+            return content
+    except UnicodeDecodeError:
+        try:
+            with open(filepath, 'r', encoding='cp932') as f:
+                content = f.read()
+                return content
+        except Exception as e:
+            logger.error(f"Error reading file {filepath}: {str(e)}")
+            return None
+    except Exception as e:
+        logger.error(f"Error reading file {filepath}: {str(e)}")
+        return None
+
+def get_python_files(directory: str, exclude_patterns: List[str]) -> List[Tuple[str, str]]:
+    """指定ディレクトリ配下のPythonファイルを取得"""
+    python_files = []
+    
+    try:
+        for root, dirs, files in os.walk(directory):
+            # ディレクトリ名を基にした除外チェック
+            dir_name = os.path.basename(root)
+            should_skip = any(
+                fnmatch.fnmatch(dir_name, pattern.strip())
+                for pattern in exclude_patterns
+            )
+            
+            if should_skip:
+                dirs.clear()  # サブディレクトリの走査をスキップ
+                continue
+            
+            # 除外パターンに一致するディレクトリを削除
+            dirs[:] = [d for d in dirs if not any(
+                fnmatch.fnmatch(d, pattern.strip())
+                for pattern in exclude_patterns
+            )]
+            
+            for file in files:
+                if not file.endswith('.py'):
+                    continue
+                
+                # ファイル名を基にした除外チェック
+                if any(fnmatch.fnmatch(file, pattern.strip()) for pattern in exclude_patterns):
+                    continue
+                
+                filepath = os.path.join(root, file)
+                rel_path = os.path.relpath(filepath, directory)
+                python_files.append((rel_path, filepath))
+        
+        return sorted(python_files)
+        
+    except Exception as e:
+        logger.error(f"Error getting Python files from {directory}: {str(e)}")
+        return []
+

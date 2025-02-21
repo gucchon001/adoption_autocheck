@@ -1,0 +1,10 @@
+selenium>=4.16.0
+gspread
+requests
+chromedriver-binary
+oauth2client
+pandas
+python-dateutil
+webdriver-manager>=4.0.1
+pytest
+numpy

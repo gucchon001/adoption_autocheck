@@ -188,75 +188,59 @@ class ApplicantChecker:
                 return True
         return False
 
-    def check_pattern(self, applicant_data: Dict) -> tuple[int, str]:
-        """
-        応募者データのパターンを判定する
+    def _parse_date(self, date_str: str) -> Optional[datetime]:
+        """日付文字列をdatetimeオブジェクトに変換"""
+        if date_str == "未定":
+            return None
         
-        Args:
-            applicant_data (Dict): 応募者データ
-            
-        Returns:
-            tuple[int, str]: (パターン番号, 判定理由)
-        """
-        # 現在の日付を取得
+        formats = ['%Y/%m/%d', '%Y-%m-%d']  # 対応する日付フォーマット
+        
+        for fmt in formats:
+            try:
+                return datetime.strptime(date_str, fmt)
+            except ValueError:
+                continue
+        return None
+
+    def check_pattern(self, applicant_data: Dict) -> tuple[int, str]:
+        """応募者データのパターンを判定する"""
         now = datetime.now()
         
         for pattern in self.patterns:
-            # ステータスチェック
             if pattern['status'] != applicant_data['status']:
                 continue
             
-            # お祝いと備考のチェック
             if (pattern['oiwai'] != applicant_data['oiwai'] or 
                 pattern['remark'] != applicant_data['remark']):
                 continue
             
+            # 研修初日の日付変換
+            training_date = self._parse_date(applicant_data['training_start_date'])
+            
             # 研修初日のチェック
             if pattern['training_start_date'] == '{実行月以降}':
-                if applicant_data['training_start_date'] == '未定':
-                    continue
-                try:
-                    training_date = datetime.strptime(
-                        applicant_data['training_start_date'], 
-                        '%Y-%m-%d'
-                    )
-                    if training_date < now:
-                        continue
-                except ValueError:
+                if not training_date or training_date < now:
                     continue
                 
             elif pattern['training_start_date'] == '{1ヶ月以上経過}':
-                if applicant_data['training_start_date'] == '未定':
+                if not training_date:
                     continue
-                try:
-                    training_date = datetime.strptime(
-                        applicant_data['training_start_date'], 
-                        '%Y-%m-%d'
-                    )
-                    one_month_ago = now - relativedelta(months=1)
-                    if training_date > one_month_ago:
-                        continue
-                except ValueError:
+                one_month_ago = now - relativedelta(months=1)
+                if training_date > one_month_ago:
                     continue
                 
-            elif pattern['training_start_date'] and pattern['training_start_date'] != applicant_data['training_start_date']:
+            elif (pattern['training_start_date'] and 
+                  pattern['training_start_date'] != applicant_data['training_start_date']):
                 continue
             
             # 在籍確認のチェック
             if pattern['zaiseki'] and pattern['zaiseki'] != applicant_data['zaiseki']:
                 continue
             
-            # すべての条件に一致
-            reason = f"パターン{pattern['pattern']}: "
-            reason += f"ステータス({applicant_data['status']})"
-            if applicant_data['training_start_date']:
-                reason += f"・研修初日({applicant_data['training_start_date']})"
-            if applicant_data['zaiseki']:
-                reason += f"・在籍確認({applicant_data['zaiseki']})"
-            
+            # 判定理由の構築
+            reason = self._build_pattern_reason(pattern['pattern'], applicant_data)
             return pattern['pattern'], reason
         
-        # どのパターンにも一致しない場合
         return 99, "該当するパターンなし"
 
     @staticmethod
@@ -270,4 +254,33 @@ class ApplicantChecker:
         Returns:
             str: 整形されたチェック結果
         """
-        return f"要確認（{reason}）" 
+        return f"要確認（{reason}）"
+
+    def _build_pattern_reason(self, pattern_id: int, applicant_data: Dict) -> str:
+        """
+        パターンに応じた判定理由を構築します。
+
+        Args:
+            pattern_id (int): パターンID
+            applicant_data (Dict): 応募者データ
+
+        Returns:
+            str: 判定理由
+        """
+        pattern_reasons = {
+            1: "不採用等確定",
+            2: "研修日未定・在籍確認未実施",
+            3: "研修日当月以降・在籍確認未実施",
+            4: "研修日1ヶ月経過・在籍確認済み",
+            99: "該当するパターンなし"
+        }
+
+        # パターンに応じた基本の理由を取得
+        reason = pattern_reasons.get(pattern_id, "不明なパターン")
+
+        # 研修日情報を追加（必要な場合）
+        if pattern_id in [2, 3, 4]:
+            training_date = applicant_data.get('training_start_date', '未定')
+            reason = f"{reason}（研修日: {training_date}）"
+
+        return reason 

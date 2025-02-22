@@ -98,10 +98,6 @@ class Browser:
                 'c[admin_check_flag]': 'false'
             }
             
-            # テストモードでない場合は提出期限を今月末に設定
-            if not test_mode:
-                base_params['c[submit_expired_on]'] = '1'
-            
             # URLパラメータの構築
             params = '&'.join([f'{k}={v}' for k, v in base_params.items()])
             search_url = f"{self.settings.get('URL', 'base_url')}/admin/adoptions?{params}&commit=検索"
@@ -176,14 +172,6 @@ class Browser:
                 self.driver.find_element(
                     By.CSS_SELECTOR,
                     selectors['submit_deadline']['selector_value']
-                ).click()
-            
-            # 期限超過累積を設定
-            overdue_value = EnvironmentUtils.get_config_value('SEARCH', 'overdue_cumulative', '')
-            if overdue_value:
-                self.driver.find_element(
-                    By.CSS_SELECTOR,
-                    selectors['overdue_cumulative']['selector_value']
                 ).click()
                 
             # 検索ボタンをクリック

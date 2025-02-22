@@ -39,6 +39,7 @@ class EnvironmentUtils:
         Args:
             test_mode (bool): テストモードで実行するかどうか
         """
+        # 環境変数ファイルのパスを設定
         env_file = (
             EnvironmentUtils.BASE_DIR / "config" / 
             ("secrets_test.env" if test_mode else "secrets.env")
@@ -49,11 +50,11 @@ class EnvironmentUtils:
 
         load_dotenv(env_file)
         
-        # 設定ファイルのパスを設定
-        EnvironmentUtils._settings_file = (
-            EnvironmentUtils.BASE_DIR / "config" / 
-            ("settings_test.ini" if test_mode else "settings.ini")
-        )
+        # 設定ファイルのパスを設定（settings.iniに統一）
+        EnvironmentUtils._settings_file = EnvironmentUtils.BASE_DIR / "config" / "settings.ini"
+        
+        if not EnvironmentUtils._settings_file.exists():
+            raise FileNotFoundError(f"{EnvironmentUtils._settings_file} が見つかりません。")
 
     @staticmethod
     def get_env_var(var_name: str, default: Optional[Any] = None) -> Any:

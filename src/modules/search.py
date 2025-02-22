@@ -56,37 +56,23 @@ class Search:
     def _set_submit_status(self):
         """提出ステータスを設定"""
         try:
-            status_value = env.get_config_value('SEARCH', 'submit_status', '0')
-            selector_type = self.selectors['submit_status']['selector_type'].upper()
-            selector_value = self.selectors['submit_status']['selector_value']
-
-            if status_value != "0":
-                # 値が設定されている場合
-                if status_value:
-                    selector_value = f"{selector_value}[value='{status_value}']"
-            else:
-                # 指定なしの場合
-                selector_value = f"{selector_value}[value='']"
-
-            submit_status = self.browser.wait.until(
-                EC.element_to_be_clickable((
-                    getattr(By, selector_type),
-                    selector_value
+            # ページが完全に読み込まれるまで待機
+            self.browser.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "input[name='submission_status']"
                 ))
             )
-            submit_status.click()
+            time.sleep(1)
 
-            if status_value != "0":
-                status_text = {
-                    1: "未提出",
-                    2: "提出中",
-                    3: "差戻し",
-                    4: "完了"
-                }.get(int(status_value), "不明")
-                print(f"✅ 提出ステータスを設定: {status_text}")
-            else:
-                print("✅ 提出ステータス: 指定なし")
-
+            # JavaScriptを使用して要素をクリック
+            radio_button = self.browser.driver.find_element(
+                By.CSS_SELECTOR, 
+                "input[name='submission_status'][value='2']"
+            )
+            self.browser.driver.execute_script("arguments[0].click();", radio_button)
+            
+            print("✅ 提出ステータスを設定しました")
             return True
 
         except Exception as e:

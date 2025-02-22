@@ -65,19 +65,42 @@ def main(test_mode: bool = False):
         browser.driver.get(adoptions_url)
         time.sleep(2)
 
-        # 検索処理
-        search = Search(browser, selectors)
-        if not search.execute():
-            raise Exception("検索処理に失敗しました")
+        # 繰り返し処理の設定を読み込み
+        repeat_until_empty = env.get_config_value('BROWSER', 'repeat_until_empty', False)
+        all_applicants = []
+        first_search = True
 
-        # 応募者データの処理（セレクター情報を直接渡す）
-        applicants_to_log = browser.process_applicants(checker, env)
+        while True:
+            if first_search:
+                # 初回のみ検索条件を設定
+                search = Search(browser, selectors)
+                if not search.execute():
+                    raise Exception("検索処理に失敗しました")
+                first_search = False
+            else:
+                # 2回目以降は単純にページをリロード
+                browser.driver.refresh()
+                time.sleep(2)  # ページの読み込みを待機
 
-        # ログの記録
-        if applicants_to_log:
-            print("\n=== ログ記録処理開始 ===")
-            if not logger.log_applicants(applicants_to_log):
+            # 応募者データの処理
+            applicants_to_log = browser.process_applicants(checker, env)
+            
+            if not applicants_to_log:
+                print("処理対象のデータがありません")
+                break
+                
+            all_applicants.extend(applicants_to_log)
+            
+            if not repeat_until_empty:
+                break
+                
+            time.sleep(2)  # 次の処理前に待機
+
+        # ログの記録（全件まとめて）
+        if all_applicants:
+            if not logger.log_applicants(all_applicants):
                 raise Exception("ログの記録に失敗しました")
+            print(f"\n✅ 全{len(all_applicants)}件の処理が完了しました")
 
     except Exception as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")

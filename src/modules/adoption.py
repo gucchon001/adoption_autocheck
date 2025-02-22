@@ -1,127 +1,189 @@
-from telnetlib import EC
-import time
+from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.select import Select
 from datetime import datetime
-from dateutil.relativedelta import relativedelta
+import time
+from ..utils.logging_config import get_logger
 
 class Adoption:
-    def __init__(self, driver, wait):
-        self.driver = driver
-        self.wait = wait
-
-    def get_applicants_data(self):
-        """応募者情報の取得"""
-        applicants = {}
-        try:
-            # 応募者一覧テーブルの取得
-            table = self.driver.find_elements(By.CLASS_NAME, "w_900")[1]
-            rows = table.find_elements(By.TAG_NAME, "tr")
-            
-            current_applicant_id = None
-            row_count = 0
-            
-            for row in rows:
-                # ヘッダー行をスキップ
-                if len(row.find_elements(By.TAG_NAME, "th")) != 0:
-                    continue
-                
-                row_count += 1
-                
-                if row_count == 1:
-                    # 1行目: 基本情報
-                    current_applicant_id = row.find_element(By.CLASS_NAME, "no").text.strip()
-                    status = Select(row.find_element(By.CLASS_NAME, "job_adoptions__adoption_status_id")).first_selected_option.text
-                    first_work = row.find_element(By.CLASS_NAME, "job_adoptions__training_first_on").get_attribute("value")
-                    
-                    applicants[current_applicant_id] = {
-                        "status": status,
-                        "first_work": first_work,
-                        "enrollment": "",
-                        "recruit_celebration": "",
-                        "admin_memo": "",
-                        "check_element": None
-                    }
-                    
-                elif row_count == 2:
-                    # 2行目: 在籍確認
-                    enrollment = ""
-                    enrollment_elements = row.find_elements(By.CLASS_NAME, "job_adoptions__belong_1month_enum")
-                    if enrollment_elements:
-                        enrollment = Select(enrollment_elements[0]).first_selected_option.text
-                    applicants[current_applicant_id]["enrollment"] = enrollment
-                    
-                elif row_count == 3:
-                    # 3行目: お祝い、メモ、チェック要素
-                    applicants[current_applicant_id].update({
-                        "recruit_celebration": row.find_element(By.TAG_NAME, "td").text,
-                        "admin_memo": row.find_element(By.CLASS_NAME, "job_adoptions__remark_dummy").get_attribute("value"),
-                        "check_element": row.find_element(By.CLASS_NAME, "job_adoptions__admin_check_flag")
-                    })
-                    row_count = 0
-                    current_applicant_id = None
-            
-            return applicants
-            
-        except Exception as e:
-            print(f"応募者情報の取得でエラー: {str(e)}")
-            return {}
-
-    def should_check_applicant(self, applicant_data, processed_ids):
-        """応募者のチェック要否を判定"""
-        if applicant_data["id"] in processed_ids:
-            return False
-            
-        current_date = datetime.now()
-        try:
-            check_date = datetime.strptime(applicant_data["first_work"], "%Y/%m/%d")
-        except:
-            check_date = applicant_data["first_work"]
-
-        # 採用かつ祝い・メモが空の場合
-        if applicant_data["status"] == "採用" and not applicant_data["recruit_celebration"] and not applicant_data["admin_memo"]:
-            # 研修日未定かつ在籍確認なし
-            if applicant_data["first_work"] and not applicant_data["enrollment"] and check_date == "未定":
-                return True
-                
-            # 当月以降の研修日かつ在籍確認なし
-            if applicant_data["first_work"] and (check_date.year > current_date.year or 
-                (check_date.year == current_date.year and check_date.month >= current_date.month)) and not applicant_data["enrollment"]:
-                return True
-                
-            # 研修から1ヶ月経過かつ在籍確認済
-            if applicant_data["first_work"] and (current_date - relativedelta(months=1) >= check_date) and applicant_data["enrollment"] == "◯":
-                return True
-
-        # 不採用系ステータスかつ祝い・メモが空の場合
-        elif applicant_data["status"] in ["保留", "不合格", "連絡取れず", "辞退", "欠席"] and not applicant_data["recruit_celebration"] and not applicant_data["admin_memo"]:
-            return True
-
-        return False
-
-    def apply_checks(self, applicants_data, processed_ids):
-        """チェック処理の実行"""
-        checked_applicants = []
-        check_performed = False
+    def __init__(self, browser, selectors, checker=None, env=None):
+        """
+        採用確認機能を管理するクラス
         
-        for applicant_id, data in applicants_data.items():
-            if self.should_check_applicant(data, processed_ids):
-                data["check_element"].click()
-                checked_applicants.append({
-                    "id": applicant_id,
-                    "status": data["status"]
-                })
-                check_performed = True
+        Args:
+            browser: Browserクラスのインスタンス
+            selectors: セレクター情報
+            checker: ApplicantCheckerクラスのインスタンス
+            env: EnvironmentUtilsクラス
+        """
+        self.browser = browser
+        self.selectors = selectors
+        self.checker = checker
+        self.env = env
+        self.check_changes_made = False
+        self.logger = get_logger(__name__)
+        
+    def check_search_results(self):
+        """
+        検索結果を確認
+        
+        Returns:
+            tuple: (bool, int) - (データ有無, レコード数)
+        """
+        try:
+            # テーブルの読み込みを待機
+            table = self.browser.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "#recruitment-list table.table-sm"
+                ))
+            )
+            time.sleep(2)
+            self.logger.info("✅ テーブルの読み込み完了")
+
+            # 検索結果の確認
+            try:
+                # "該当する採用確認が見つかりませんでした"のメッセージを確認
+                no_data_message = table.find_element(
+                    By.CSS_SELECTOR, 
+                    "tbody tr td[colspan='10']"
+                ).text.strip()
                 
-        if check_performed:
-            # 変更ボタンクリック
-            self.driver.find_elements(By.CSS_SELECTOR, ".box-button.large")[1].find_element(By.TAG_NAME, "input").click()
-            self.wait.until(EC.presence_of_all_elements_located)
-            time.sleep(1)
+                if "該当する採用確認が見つかりませんでした" in no_data_message:
+                    self.logger.info("検索結果が0件のため、処理を終了します")
+                    return False, 0
+                    
+            except Exception:
+                # メッセージが見つからない場合は通常の行数チェックを実行
+                rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
+                total_rows = len(rows)
+                record_count = total_rows // 3
+                self.logger.info(f"取得した行数: {total_rows} (レコード数: {record_count})")
+                
+                if total_rows == 0:
+                    self.logger.info("検索結果が0件のため、処理を終了します")
+                    return False, 0
+                    
+                return True, record_count
+
+        except Exception as e:
+            self.logger.error(f"❌ 検索結果の確認でエラー: {str(e)}")
+            return False, 0
+
+    def process_record(self, rows, record_index):
+        """
+        1レコード分の情報を処理
+        
+        Args:
+            rows: テーブルの行要素リスト
+            record_index: レコードのインデックス
             
-            # 実行ボタンクリック
-            self.driver.find_elements(By.CSS_SELECTOR, ".box-button.large")[0].find_element(By.TAG_NAME, "input").click()
-            self.wait.until(EC.presence_of_all_elements_located)
-            time.sleep(2.5)
+        Returns:
+            dict: 処理したレコードの情報
+        """
+        try:
+            record_offset = record_index * 3
+            self.logger.info(f"\n=== {record_index + 1}レコード目の情報取得とパターン分析 ===")
             
-        return checked_applicants 
+            # データ収集
+            applicant_data = {}
+            
+            # 応募IDを取得
+            try:
+                selector_type = self.selectors['applicant_id']['selector_type'].upper()
+                selector_value = self.selectors['applicant_id']['selector_value']
+                applicant_id = rows[record_offset].find_element(
+                    getattr(By, selector_type), selector_value
+                ).text.strip()
+                applicant_data['id'] = applicant_id
+                self.logger.info(f"✅ {self.selectors['applicant_id']['description']}: {applicant_id}")
+            except Exception as e:
+                self.logger.error(f"❌ 応募IDの取得に失敗: {str(e)}")
+                return None
+
+            # ステータス取得
+            selector_type = self.selectors['status']['selector_type'].upper()
+            selector_value = self.selectors['status']['selector_value']
+            status_select = Select(rows[record_offset].find_element(
+                getattr(By, selector_type), selector_value
+            ))
+            applicant_data['status'] = status_select.first_selected_option.text
+            self.logger.info(f"✅ {self.selectors['status']['description']}: {applicant_data['status']}")
+            
+            # 研修初日取得
+            selector_type = self.selectors['training_start_date']['selector_type'].upper()
+            selector_value = self.selectors['training_start_date']['selector_value']
+            training_date = rows[record_offset].find_element(
+                getattr(By, selector_type), selector_value
+            ).text.strip()
+            applicant_data['training_start_date'] = training_date
+            self.logger.info(f"✅ {self.selectors['training_start_date']['description']}: {training_date}")
+            
+            # 在籍確認取得
+            selector_type = self.selectors['zaiseki_ok']['selector_type'].upper()
+            selector_value = self.selectors['zaiseki_ok']['selector_value']
+            zaiseki_select = Select(rows[record_offset + 1].find_element(
+                getattr(By, selector_type), selector_value
+            ))
+            applicant_data['zaiseki'] = zaiseki_select.first_selected_option.text
+            self.logger.info(f"✅ {self.selectors['zaiseki_ok']['description']}: {applicant_data['zaiseki']}")
+            
+            # 3行目の要素を取得（お祝い、備考）
+            self.logger.info("\n【3行目】")
+            for element, key in [('celebration', 'oiwai'), ('remark', 'remark')]:
+                if element in self.selectors:
+                    try:
+                        element_info = self.selectors[element]
+                        selector_type = element_info['selector_type'].upper()
+                        selector_value = element_info['selector_value']
+                        element_obj = rows[record_offset + 2].find_element(
+                            getattr(By, selector_type), selector_value
+                        )
+                        
+                        if key == 'remark':
+                            value = element_obj.text.strip() if element_obj.text.strip() else ''
+                        else:
+                            value = element_obj.text if element_info['action_type'] == 'get_text' else ''
+                            
+                        applicant_data[key] = value
+                        self.logger.info(f"✅ {element_info['description']}: {value}")
+                    except Exception as e:
+                        self.logger.error(f"❌ {element_info['description']}の取得に失敗: {str(e)}")
+                        applicant_data[key] = ''
+
+            # パターン判定
+            pattern, reason = self.checker.check_pattern(applicant_data)
+            self.logger.info(f"\n判定結果: パターン{pattern}")
+            self.logger.info(f"判定理由: {reason}")
+            
+            # パターン情報を追加
+            applicant_data['pattern'] = str(pattern)
+            applicant_data['confirm_checkbox'] = ''
+            applicant_data['confirm_onoff'] = ''
+
+            # パターン99以外の場合の処理
+            if pattern != 99:
+                try:
+                    # チェックボックスの操作
+                    selector_type = self.selectors['confirm_checkbox']['selector_type'].upper()
+                    selector_value = self.selectors['confirm_checkbox']['selector_value']
+                    checkbox = rows[record_offset + 2].find_element(
+                        getattr(By, selector_type), selector_value
+                    )
+                    checkbox.click()
+                    applicant_data['confirm_checkbox'] = 'チェック'
+                    self.check_changes_made = True
+                    self.logger.info("✅ 確認完了チェックボックスをONに設定")
+                    
+                    # auto_updateの設定を取得して更新状態を設定
+                    auto_update = self.env.get_config_value('BROWSER', 'auto_update', default=False)
+                    applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
+                    
+                except Exception as e:
+                    self.logger.error(f"❌ チェックボックスの操作に失敗: {str(e)}")
+
+            return applicant_data
+
+        except Exception as e:
+            self.logger.error(f"❌ レコード処理でエラー: {str(e)}")
+            return None 

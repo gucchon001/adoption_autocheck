@@ -9,6 +9,7 @@ import time
 import pandas as pd
 from selenium.webdriver.support.select import Select
 from ..utils.environment import EnvironmentUtils
+from .adoption import Adoption
 
 class Browser:
     def __init__(self, settings_path='config/settings.ini', selectors_path='config/selectors.csv'):
@@ -221,4 +222,52 @@ class Browser:
             
         except Exception as e:
             print(f"❌ 採用確認ページの遷移と検索でエラー: {str(e)}")
-            return False 
+            return False
+
+    def process_applicants(self, checker, env):
+        """
+        応募者データの処理を実行
+        
+        Args:
+            checker: ApplicantCheckerクラスのインスタンス
+            env: EnvironmentUtilsクラス
+            
+        Returns:
+            list: 処理した応募者データのリスト
+        """
+        applicants_to_log = []
+        
+        try:
+            # 採用確認処理
+            print("\n=== 採用確認処理開始 ===")
+            # セレクター情報をcheckerから取得
+            selectors = checker.get_selectors()
+            adoption = Adoption(self, selectors, checker=checker, env=env)
+            
+            # 検索結果の確認
+            has_data, record_count = adoption.check_search_results()
+            if not has_data:
+                print("処理対象のデータがありません")
+                return []
+
+            # テーブルの取得
+            table = self.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "#recruitment-list table.table-sm"
+                ))
+            )
+            rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
+
+            # レコードの処理
+            for record_index in range(record_count):
+                applicant_data = adoption.process_record(rows, record_index)
+                if applicant_data:
+                    applicants_to_log.append(applicant_data)
+
+            print(f"\n✅ 全{record_count}件の処理が完了しました")
+            return applicants_to_log
+
+        except Exception as e:
+            print(f"❌ 応募者データの処理でエラー: {str(e)}")
+            return [] 

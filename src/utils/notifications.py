@@ -80,9 +80,29 @@ class Notifier:
 
                 # パターンごとの件数
                 if 'patterns' in stats:
+                    pattern_descriptions = {
+                        1: {
+                            "保留": "選考結果が保留中",
+                            "不合格": "不合格が確定",
+                            "連絡取れず": "連絡が取れない状態",
+                            "辞退": "応募者から辞退の連絡",
+                            "欠席": "面接・説明会に欠席"
+                        },
+                        2: "採用：研修日未定・在籍確認未実施",
+                        3: "採用：研修日が実行月以降・在籍確認未実施",
+                        4: "採用：研修日から1ヶ月以上経過・在籍確認済み"
+                    }
+                    
                     pattern_text = "*パターン別件数:*\n"
                     for pattern, count in stats['patterns'].items():
-                        pattern_text += f"• パターン{pattern}: {count}件\n"
+                        if pattern == 1:
+                            # パターン1は複数の状態があるため、合計を表示
+                            pattern_text += f"• パターン1（要対応）: {count}件\n"
+                            pattern_text += "  - 保留/不合格/連絡取れず/辞退/欠席のいずれか\n"
+                        else:
+                            description = pattern_descriptions.get(pattern, "不明なパターン")
+                            pattern_text += f"• パターン{pattern}: {count}件\n"
+                            pattern_text += f"  - {description}\n"
                     
                     blocks.append({
                         "type": "section",

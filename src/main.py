@@ -5,6 +5,8 @@ from src.modules.logger import Logger
 from src.modules.checker import ApplicantChecker
 from src.modules.login import Login
 from src.modules.search import Search
+from src.utils.notifications import Notifier
+from collections import Counter
 import time
 from pathlib import Path
 
@@ -27,27 +29,37 @@ def main(test_mode: bool = False):
         spreadsheet_key=spreadsheet_settings['spreadsheet_key']
     )
     
-    # スプレッドシートに接続
-    if not spreadsheet.connect():
-        raise Exception("スプレッドシートへの接続に失敗しました")
+    # Notifierクラスのインスタンス化
+    webhook_url = env.get_env_var('SLACK_WEBHOOK', '')
+    print(f"\nDEBUG: Slack webhook: {webhook_url if webhook_url else '未設定'}")
     
-    # Loggerクラスのインスタンス化
-    logger = Logger(spreadsheet)
-    
-    # セレクター情報の読み込み
-    checker = ApplicantChecker(
-        Path("config/selectors.csv"),
-        Path("config/judge_list.csv")
-    )
-    selectors = checker.get_selectors()
-    
-    # ブラウザ設定の読み込み
-    browser = Browser(
-        settings_path='config/settings.ini',
-        selectors_path='config/selectors.csv'
-    )
+    if not webhook_url:
+        print("警告: Slack webhook URLが設定されていません。通知は無効化されます。")
+        notifier = None
+    else:
+        notifier = Notifier(webhook_url)
     
     try:
+        # スプレッドシートに接続
+        if not spreadsheet.connect():
+            raise Exception("スプレッドシートへの接続に失敗しました")
+        
+        # Loggerクラスのインスタンス化
+        logger = Logger(spreadsheet)
+        
+        # セレクター情報の読み込み
+        checker = ApplicantChecker(
+            Path("config/selectors.csv"),
+            Path("config/judge_list.csv")
+        )
+        selectors = checker.get_selectors()
+        
+        # ブラウザ設定の読み込み
+        browser = Browser(
+            settings_path='config/settings.ini',
+            selectors_path='config/selectors.csv'
+        )
+        
         print("\n=== ブラウザテスト開始 ===")
         print("1. ブラウザを起動中...")
         browser.setup()
@@ -69,6 +81,7 @@ def main(test_mode: bool = False):
         repeat_until_empty = env.get_config_value('BROWSER', 'repeat_until_empty', False)
         all_applicants = []
         first_search = True
+        pattern_counts = Counter()
 
         while True:
             if first_search:
@@ -89,6 +102,11 @@ def main(test_mode: bool = False):
                 print("処理対象のデータがありません")
                 break
                 
+            # パターンのカウント
+            for applicant in applicants_to_log:
+                if 'pattern' in applicant:
+                    pattern_counts[applicant['pattern']] += 1
+            
             all_applicants.extend(applicants_to_log)
             
             if not repeat_until_empty:
@@ -102,8 +120,29 @@ def main(test_mode: bool = False):
                 raise Exception("ログの記録に失敗しました")
             print(f"\n✅ 全{len(all_applicants)}件の処理が完了しました")
 
+            # 成功通知
+            if notifier:
+                stats = {
+                    'total': len(all_applicants),
+                    'patterns': dict(pattern_counts)
+                }
+                notifier.send_slack_notification(
+                    status="success",
+                    stats=stats,
+                    spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
+                    test_mode=test_mode
+                )
+
     except Exception as e:
         print(f"\n❌ エラーが発生しました: {str(e)}")
+        # エラー通知
+        if notifier:
+            notifier.send_slack_notification(
+                status="error",
+                error_message=str(e),
+                spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
+                test_mode=test_mode
+            )
         raise
     finally:
         # ブラウザを終了

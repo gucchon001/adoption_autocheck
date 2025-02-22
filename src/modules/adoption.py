@@ -96,7 +96,7 @@ class Adoption:
                     getattr(By, selector_type), selector_value
                 ).text.strip()
                 applicant_data['id'] = applicant_id
-                self.logger.info(f"✅ {self.selectors['applicant_id']['description']}: {applicant_id}")
+                self.logger.info(f"応募ID: {applicant_id}")
             except Exception as e:
                 self.logger.error(f"❌ 応募IDの取得に失敗: {str(e)}")
                 return None

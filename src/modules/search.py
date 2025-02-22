@@ -24,7 +24,7 @@ class Search:
         """
         try:
             # 検索条件の設定と検索実行をテスト
-            print("\n4. 検索条件の設定テスト...")
+            print("\n4. 検索条件の設定...")
             
             # ページが完全に読み込まれるまで待機
             self.browser.wait.until(

@@ -1,14 +1,16 @@
 from src.modules.spreadsheet import SpreadSheet
 from src.utils.environment import EnvironmentUtils as env
 from src.modules.browser import Browser
-from src.modules.logger import Logger
+from src.modules.logger import Logger  # SpreadSheetのロギング用
 from src.modules.checker import ApplicantChecker
 from src.modules.login import Login
 from src.modules.search import Search
 from src.utils.notifications import Notifier
+from src.modules.scheduler import Scheduler
 from collections import Counter
 import time
 from pathlib import Path
+from src.utils.logging_config import get_logger
 
 def main(test_mode: bool = False):
     """
@@ -17,35 +19,51 @@ def main(test_mode: bool = False):
     Args:
         test_mode (bool): テストモードで実行するかどうか
     """
-    print(f"実行モード: {'テスト' if test_mode else '本番'}")
+    # アプリケーションロガーの取得
+    app_logger = get_logger(__name__)
     
-    # 環境設定の読み込み
-    env.load_env(test_mode=test_mode)
-    
-    # SpreadSheetクラスのインスタンス化
-    spreadsheet_settings = env.get_spreadsheet_settings()
-    spreadsheet = SpreadSheet(
-        credentials_path=spreadsheet_settings['credentials_path'],
-        spreadsheet_key=spreadsheet_settings['spreadsheet_key']
-    )
-    
-    # Notifierクラスのインスタンス化
-    webhook_url = env.get_env_var('SLACK_WEBHOOK', '')
-    print(f"\nDEBUG: Slack webhook: {webhook_url if webhook_url else '未設定'}")
-    
-    if not webhook_url:
-        print("警告: Slack webhook URLが設定されていません。通知は無効化されます。")
-        notifier = None
-    else:
-        notifier = Notifier(webhook_url)
+    app_logger.info(f"実行モード: {'テスト' if test_mode else '本番'}")
     
     try:
+        # 環境設定の読み込み
+        env.load_env(test_mode=test_mode)
+        
+        # スケジューラーの初期化
+        scheduler = Scheduler(
+            list(map(int, env.get_config_value('SCHEDULE', 'exec_time1', '12:00').split(':'))),
+            list(map(int, env.get_config_value('SCHEDULE', 'exec_time2', '18:00').split(':')))
+        )
+        
+        # スケジューラーが有効な場合、実行時刻まで待機
+        if scheduler.enabled:
+            app_logger.info(f"スケジュール実行: {scheduler.get_schedule_text()}")
+            scheduler.wait_for_execution_time()
+        else:
+            app_logger.info("スケジューラー無効: 即時実行")
+
+        # SpreadSheetクラスのインスタンス化
+        spreadsheet_settings = env.get_spreadsheet_settings()
+        spreadsheet = SpreadSheet(
+            credentials_path=spreadsheet_settings['credentials_path'],
+            spreadsheet_key=spreadsheet_settings['spreadsheet_key']
+        )
+        
+        # Notifierクラスのインスタンス化（schedulerを渡す）
+        webhook_url = env.get_env_var('SLACK_WEBHOOK', '')
+        app_logger.debug(f"Slack webhook: {webhook_url if webhook_url else '未設定'}")
+        
+        if not webhook_url:
+            app_logger.warning("Slack webhook URLが設定されていません。通知は無効化されます。")
+            notifier = None
+        else:
+            notifier = Notifier(webhook_url)
+        
         # スプレッドシートに接続
         if not spreadsheet.connect():
             raise Exception("スプレッドシートへの接続に失敗しました")
         
-        # Loggerクラスのインスタンス化
-        logger = Logger(spreadsheet)
+        # SpreadSheet用のLoggerクラスのインスタンス化
+        spreadsheet_logger = Logger(spreadsheet)
         
         # セレクター情報の読み込み
         checker = ApplicantChecker(
@@ -116,39 +134,49 @@ def main(test_mode: bool = False):
 
         # ログの記録（全件まとめて）
         if all_applicants:
-            if not logger.log_applicants(all_applicants):
+            if not spreadsheet_logger.log_applicants(all_applicants):
                 raise Exception("ログの記録に失敗しました")
-            print(f"\n✅ 全{len(all_applicants)}件の処理が完了しました")
+            app_logger.info(f"✅ 全{len(all_applicants)}件の処理が完了しました")
 
-            # 成功通知
+            # 成功通知（schedulerの情報を含める）
             if notifier:
+                # パターン99をフィルタリングした統計情報
+                include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+                filtered_patterns = {
+                    k: v for k, v in pattern_counts.items() 
+                    if k != '99' or include_pattern_99
+                }
+                
                 stats = {
                     'total': len(all_applicants),
-                    'patterns': dict(pattern_counts)
+                    'patterns': filtered_patterns
                 }
+                
                 notifier.send_slack_notification(
                     status="success",
                     stats=stats,
                     spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
-                    test_mode=test_mode
+                    test_mode=test_mode,
+                    scheduler=scheduler  # schedulerを追加
                 )
 
     except Exception as e:
-        print(f"\n❌ エラーが発生しました: {str(e)}")
+        app_logger.error(f"❌ エラーが発生しました: {str(e)}")
         # エラー通知
         if notifier:
             notifier.send_slack_notification(
                 status="error",
                 error_message=str(e),
                 spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
-                test_mode=test_mode
+                test_mode=test_mode,
+                scheduler=scheduler  # schedulerを追加
             )
         raise
     finally:
         # ブラウザを終了
         if browser and browser.driver:
             browser.driver.quit()
-            print("\n✅ ブラウザを終了しました")
+            app_logger.info("✅ ブラウザを終了しました")
 
 if __name__ == "__main__":
     import argparse

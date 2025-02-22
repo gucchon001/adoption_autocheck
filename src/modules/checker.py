@@ -3,6 +3,7 @@ from dateutil.relativedelta import relativedelta
 from typing import Dict, List, Optional
 from pathlib import Path
 import csv
+import logging
 
 class ApplicantChecker:
     def __init__(self, selectors_file: Path, judge_list_file: Path):
@@ -13,6 +14,7 @@ class ApplicantChecker:
         """
         self.selectors = self._load_selectors(selectors_file)
         self.patterns = self._load_judge_patterns(judge_list_file)
+        self.logger = logging.getLogger(__name__)
 
     def _load_selectors(self, file_path: Path) -> Dict[str, str]:
         """
@@ -205,42 +207,38 @@ class ApplicantChecker:
     def check_pattern(self, applicant_data: Dict) -> tuple[int, str]:
         """応募者データのパターンを判定する"""
         now = datetime.now()
+        self.logger.info(f"パターン判定開始: {applicant_data}")
         
-        for pattern in self.patterns:
-            if pattern['status'] != applicant_data['status']:
-                continue
+        # パターン1の判定（保留/不合格/連絡取れず/辞退/欠席）
+        if applicant_data['status'] in ['保留', '不合格', '連絡取れず', '辞退', '欠席']:
+            reason = f"ステータス: {applicant_data['status']}"
+            self.logger.info(f"パターン1と判定: {reason}")
+            return 1, reason
             
-            if (pattern['oiwai'] != applicant_data['oiwai'] or 
-                pattern['remark'] != applicant_data['remark']):
-                continue
-            
-            # 研修初日の日付変換
+        # 採用の場合のパターン判定
+        if applicant_data['status'] == '採用':
+            # パターン2: 研修日未定
+            if applicant_data['training_start_date'] == '未定':
+                self.logger.info("パターン2と判定: 研修日未定")
+                return 2, "研修日未定・在籍確認未実施"
+                
             training_date = self._parse_date(applicant_data['training_start_date'])
-            
-            # 研修初日のチェック
-            if pattern['training_start_date'] == '{実行月以降}':
-                if not training_date or training_date < now:
-                    continue
+            if not training_date:
+                self.logger.info("パターン99と判定: 研修日のパース失敗")
+                return 99, "研修日の形式が不正"
                 
-            elif pattern['training_start_date'] == '{1ヶ月以上経過}':
-                if not training_date:
-                    continue
-                one_month_ago = now - relativedelta(months=1)
-                if training_date > one_month_ago:
-                    continue
+            # パターン3: 実行月以降
+            if training_date >= now:
+                self.logger.info("パターン3と判定: 研修日が実行月以降")
+                return 3, "研修日が実行月以降・在籍確認未実施"
                 
-            elif (pattern['training_start_date'] and 
-                  pattern['training_start_date'] != applicant_data['training_start_date']):
-                continue
-            
-            # 在籍確認のチェック
-            if pattern['zaiseki'] and pattern['zaiseki'] != applicant_data['zaiseki']:
-                continue
-            
-            # 判定理由の構築
-            reason = self._build_pattern_reason(pattern['pattern'], applicant_data)
-            return pattern['pattern'], reason
+            # パターン4: 1ヶ月以上経過
+            one_month_ago = now - relativedelta(months=1)
+            if training_date <= one_month_ago and applicant_data['zaiseki'] == '〇':
+                self.logger.info("パターン4と判定: 1ヶ月以上経過・在籍確認済み")
+                return 4, "研修日から1ヶ月以上経過・在籍確認済み"
         
+        self.logger.info("パターン99と判定: 該当するパターンなし")
         return 99, "該当するパターンなし"
 
     @staticmethod

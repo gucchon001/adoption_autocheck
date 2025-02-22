@@ -10,6 +10,7 @@ import pandas as pd
 from selenium.webdriver.support.select import Select
 from ..utils.environment import EnvironmentUtils
 from .adoption import Adoption
+from ..utils.logging_config import get_logger
 
 class Browser:
     def __init__(self, settings_path='config/settings.ini', selectors_path='config/selectors.csv'):
@@ -17,6 +18,7 @@ class Browser:
         self.settings = self._load_settings(settings_path)
         self.selectors = self._load_selectors(selectors_path)
         self.wait = None
+        self.logger = get_logger(__name__)
 
     def _load_settings(self, settings_path):
         """設定ファイルを読み込む"""
@@ -53,6 +55,7 @@ class Browser:
 
     def setup(self):
         """ChromeDriverのセットアップ"""
+        self.logger.info("ブラウザのセットアップを開始")
         options = webdriver.ChromeOptions()
         options.add_argument('--ignore-certificate-errors')
         options.add_argument('--ignore-ssl-errors')

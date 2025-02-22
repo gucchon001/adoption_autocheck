@@ -7,6 +7,8 @@ from datetime import datetime
 import json
 
 from .environment import EnvironmentUtils as env
+from ..utils.logging_config import get_logger
+from ..modules.scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +19,7 @@ class Notifier:
             webhook_url (str): SlackのWebhook URL
         """
         self.webhook_url = webhook_url
+        self.logger = get_logger(__name__)
 
     def send_slack_notification(
         self, 
@@ -24,7 +27,8 @@ class Notifier:
         stats: Optional[Dict] = None,
         error_message: Optional[str] = None,
         spreadsheet_key: Optional[str] = None,
-        test_mode: bool = False
+        test_mode: bool = False,
+        scheduler: Optional[object] = None
     ) -> bool:
         """
         Slackに通知を送信します。
@@ -35,136 +39,256 @@ class Notifier:
             error_message (Optional[str]): エラーメッセージ
             spreadsheet_key (Optional[str]): スプレッドシートのキー
             test_mode (bool): テストモードかどうか
+            scheduler (Optional[object]): スケジューラーオブジェクト
 
         Returns:
             bool: 送信が成功したかどうか
         """
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        mode_text = "[テストモード]" if test_mode else "[本番モード]"
-        
-        if status == "success":
-            blocks = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"{mode_text} ✅ 処理が完了しました",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*処理時刻:*\n{now}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*実行モード:*\n{'テスト' if test_mode else '本番'}"
-                        }
-                    ]
-                }
-            ]
+        try:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            blocks = []
 
-            if stats:
-                # 全体の処理件数
-                total_block = {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*処理件数:* {stats.get('total', 0)}件"
-                    }
-                }
-                blocks.append(total_block)
+            # include_pattern_99の設定を取得
+            include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
 
-                # パターンごとの件数
-                if 'patterns' in stats:
-                    pattern_descriptions = {
-                        1: {
-                            "保留": "選考結果が保留中",
-                            "不合格": "不合格が確定",
-                            "連絡取れず": "連絡が取れない状態",
-                            "辞退": "応募者から辞退の連絡",
-                            "欠席": "面接・説明会に欠席"
-                        },
-                        2: "採用：研修日未定・在籍確認未実施",
-                        3: "採用：研修日が実行月以降・在籍確認未実施",
-                        4: "採用：研修日から1ヶ月以上経過・在籍確認済み"
-                    }
-                    
-                    pattern_text = "*パターン別件数:*\n"
-                    for pattern, count in stats['patterns'].items():
-                        if pattern == 1:
-                            # パターン1は複数の状態があるため、合計を表示
-                            pattern_text += f"• パターン1（要対応）: {count}件\n"
-                            pattern_text += "  - 保留/不合格/連絡取れず/辞退/欠席のいずれか\n"
-                        else:
-                            description = pattern_descriptions.get(pattern, "不明なパターン")
-                            pattern_text += f"• パターン{pattern}: {count}件\n"
-                            pattern_text += f"  - {description}\n"
-                    
-                    blocks.append({
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": pattern_text
-                        }
-                    })
+            # ヘッダー（テストモードの場合のみ表示）
+            header_text = "✅ 採用確認自動プログラム" if status == "success" else "❌ エラーが発生しました"
+            if test_mode:
+                header_text = "[テストモード] " + header_text
 
-        else:  # エラーの場合
-            blocks = [
-                {
-                    "type": "header",
-                    "text": {
-                        "type": "plain_text",
-                        "text": f"{mode_text} ❌ エラーが発生しました",
-                        "emoji": True
-                    }
-                },
-                {
-                    "type": "section",
-                    "fields": [
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*発生時刻:*\n{now}"
-                        },
-                        {
-                            "type": "mrkdwn",
-                            "text": f"*実行モード:*\n{'テスト' if test_mode else '本番'}"
-                        }
-                    ]
-                },
-                {
-                    "type": "section",
-                    "text": {
-                        "type": "mrkdwn",
-                        "text": f"*エラー内容:*\n```{error_message}```"
-                    }
-                }
-            ]
-
-        # スプレッドシートのリンクを追加
-        if spreadsheet_key:
             blocks.append({
-                "type": "section",
+                "type": "header",
                 "text": {
-                    "type": "mrkdwn",
-                    "text": f"*スプレッドシート:*\nhttps://docs.google.com/spreadsheets/d/{spreadsheet_key}"
+                    "type": "plain_text",
+                    "text": header_text,
+                    "emoji": True
                 }
             })
 
-        payload = {
-            "blocks": blocks,
-            "username": "採用確認Bot",
-            "icon_emoji": ":robot_face:"
-        }
+            # 基本情報（2カラムレイアウト）
+            blocks.append({
+                "type": "section",
+                "fields": [
+                    {
+                        "type": "mrkdwn",
+                        "text": f"🕒 *処理時刻*\n{now}"
+                    },
+                    {
+                        "type": "mrkdwn",
+                        "text": f"🔄 *実行モード*\n{'テスト' if test_mode else '本番'}"
+                    }
+                ]
+            })
 
-        try:
+            # 成功時の統計情報
+            if status == "success" and stats:
+                total_count = stats.get('total', 0)
+                filtered_patterns = {k: v for k, v in stats['patterns'].items() if k != '99' or include_pattern_99}
+                check_count = sum(v for k, v in filtered_patterns.items() if k != '99')
+
+                blocks.append({
+                    "type": "section",
+                    "fields": [
+                        {
+                            "type": "mrkdwn",
+                            "text": f"📊 *処理件数*\n{total_count}件"
+                        },
+                        {
+                            "type": "mrkdwn",
+                            "text": f"✔️ *更新件数*\n{check_count}件"
+                        }
+                    ]
+                })
+
+                # 内訳セクション
+                blocks.extend([
+                    {
+                        "type": "header",
+                        "text": {
+                            "type": "plain_text",
+                            "text": "内訳）チェック更新処理",
+                            "emoji": True
+                        }
+                    }
+                ])
+
+                # パターン別の詳細を1つのセクションにまとめる
+                pattern_texts = []
+                
+                # パターン1
+                if '1' in filtered_patterns:
+                    pattern_texts.append(f"• パターン1: {filtered_patterns['1']}件\n" +
+                                      "_保留/不合格/連絡取れず/辞退/欠席_")
+
+                # パターン2-4
+                for pattern in ['2', '3', '4']:
+                    if pattern in filtered_patterns:
+                        description = {
+                            '2': "採用：研修日未定・在籍確認未実施",
+                            '3': "採用：研修日が実行月以降・在籍確認未実施",
+                            '4': "採用：研修日から1ヶ月以上経過・在籍確認済み"
+                        }[pattern]
+                        pattern_texts.append(f"• パターン{pattern}: {filtered_patterns[pattern]}件\n" +
+                                          f"_{description}_")
+
+                # パターン99
+                if '99' in filtered_patterns and include_pattern_99:
+                    pattern_texts.append(f"• パターン99: {filtered_patterns['99']}件\n" +
+                                      "_判定対象外_")
+
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "\n\n".join(pattern_texts)
+                    }
+                })
+
+            # スプレッドシートリンク
+            if spreadsheet_key:
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"📑 *ログシート*\n<https://docs.google.com/spreadsheets/d/{spreadsheet_key}|クリックして開く>"
+                    }
+                })
+
+            # 区切り線
+            blocks.append({
+                "type": "divider"
+            })
+
+            # フッター（小さく、グレーで表示）
+            blocks.append({
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            f"_設定情報: ヘッドレス={env.get_config_value('BROWSER', 'headless')} • "
+                            f"自動更新={env.get_config_value('BROWSER', 'auto_update')} • "
+                            f"0件繰返={env.get_config_value('BROWSER', 'repeat_until_empty')} • "
+                            f"P99含={env.get_config_value('LOGGING', 'include_pattern_99')} • "
+                            f"提出={self._get_submit_status_text()} • "
+                            f"期限={self._get_submit_deadline_text()} • "
+                            f"実行時刻={scheduler.get_schedule_text() if scheduler else 'なし'}_"
+                        )
+                    }
+                ]
+            })
+
+            payload = {
+                "blocks": blocks,
+                "username": "採用確認Bot",
+                "icon_emoji": ":robot_face:"
+            }
+
             response = requests.post(self.webhook_url, json=payload)
             response.raise_for_status()
-            logger.info("Slack通知を送信しました。")
             return True
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Slack通知の送信に失敗しました: {e}")
+
+        except Exception as e:
+            self.logger.error(f"Slack通知の送信に失敗: {str(e)}")
             return False
+
+    def _get_submit_status_text(self) -> str:
+        """提出ステータスのテキストを取得"""
+        status_map = {
+            "0": "指定なし",
+            "1": "未提出",
+            "2": "提出中",
+            "3": "提出済"
+        }
+        status = env.get_config_value('SEARCH', 'submit_status', '')
+        return status_map.get(str(status), str(status))
+
+    def _get_submit_deadline_text(self) -> str:
+        """提出期限のテキストを取得"""
+        deadline_map = {
+            "": "なし",
+            "1": "今月末",
+            "2": "期限超過"
+        }
+        deadline = env.get_config_value('SEARCH', 'submit_deadline', '')
+        return deadline_map.get(str(deadline), str(deadline))
+
+    def _create_pattern_blocks(self, patterns: Dict[str, int]) -> list:
+        """パターン別の詳細情報を作成"""
+        pattern_blocks = []
+        
+        # パターン99の制御設定を取得
+        include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+
+        # 要対応（パターン1）
+        if '1' in patterns:
+            pattern_blocks.extend([
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "要対応",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"• パターン1: {patterns['1']}件\n" +
+                               "_保留/不合格/連絡取れず/辞退/欠席_"
+                    }
+                }
+            ])
+
+        # 採用確定（パターン2-4）
+        adoption_patterns = {k: v for k, v in patterns.items() if k in ['2', '3', '4']}
+        if adoption_patterns:
+            pattern_blocks.extend([
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "採用確定",
+                        "emoji": True
+                    }
+                }
+            ])
+            for pattern in ['2', '3', '4']:
+                if pattern in adoption_patterns:
+                    description = {
+                        '2': "採用：研修日未定・在籍確認未実施",
+                        '3': "採用：研修日が実行月以降・在籍確認未実施",
+                        '4': "採用：研修日から1ヶ月以上経過・在籍確認済み"
+                    }[pattern]
+                    pattern_blocks.append({
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"• パターン{pattern}: {adoption_patterns[pattern]}件\n" +
+                                   f"_{description}_"
+                        }
+                    })
+
+        # その他（パターン99）
+        if '99' in patterns and include_pattern_99:
+            pattern_blocks.extend([
+                {
+                    "type": "header",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "その他",
+                        "emoji": True
+                    }
+                },
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"• パターン99: {patterns['99']}件\n" +
+                               "_判定対象外_"
+                    }
+                }
+            ])
+
+        return pattern_blocks

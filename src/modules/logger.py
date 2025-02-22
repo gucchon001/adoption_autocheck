@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import List, Dict
+from ..utils.environment import EnvironmentUtils as env
 
 class Logger:
     def __init__(self, spreadsheet):
@@ -27,6 +28,19 @@ class Logger:
                 print("記録対象のデータがありません")
                 return True
 
+            # パターン99の制御設定を読み込み
+            include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+            
+            # パターン99のフィルタリング
+            filtered_data = [
+                data for data in applicants_data
+                if data.get('pattern') != '99' or include_pattern_99
+            ]
+
+            if not filtered_data:
+                print("記録対象のデータがありません（パターン99フィルター後）")
+                return True
+
             # 現在の日時を取得
             now = datetime.now()
             current_date = now.strftime('%Y-%m-%d %H:%M:%S')
@@ -49,13 +63,13 @@ class Logger:
                     applicant.get('confirm_checkbox', ''),     # 確認完了チェックボックス
                     applicant.get('confirm_onoff', '')        # 更新反映状態
                 ]
-                for i, applicant in enumerate(applicants_data)
+                for i, applicant in enumerate(filtered_data)
             ]
 
             # スプレッドシートに追加
             try:
                 self.spreadsheet.sheet.append_rows(log_data)
-                print(f"✅ {len(applicants_data)}件のデータを記録しました")
+                print(f"✅ {len(filtered_data)}件のデータを記録しました")
                 return True
             except Exception as e:
                 print(f"データの追加に失敗: {str(e)}")

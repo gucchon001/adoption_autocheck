@@ -1,11 +1,12 @@
-from src.utils.environment import EnvironmentUtils
-from src.modules.browser import Browser
-from src.modules.adoption import Adoption
 from src.modules.spreadsheet import SpreadSheet
-from src.modules.scheduler import Scheduler
-from src.modules.log_manager import LogManager
-from src.utils.notifications import Notifier
+from src.utils.environment import EnvironmentUtils as env
+from src.modules.browser import Browser
+from src.modules.logger import Logger
+from src.modules.checker import ApplicantChecker
+from src.modules.login import Login
+from src.modules.search import Search
 import time
+from pathlib import Path
 
 def main(test_mode: bool = False):
     """
@@ -16,90 +17,76 @@ def main(test_mode: bool = False):
     """
     print(f"実行モード: {'テスト' if test_mode else '本番'}")
     
-    # 環境設定の読み込み（テストモード指定）
-    EnvironmentUtils.load_env(test_mode=test_mode)
+    # 環境設定の読み込み
+    env.load_env(test_mode=test_mode)
     
-    # 各サービスの初期化
-    scheduler = Scheduler(
-        list(map(int, EnvironmentUtils.get_config_value("SCHEDULE", "exec_time1").split(":"))),
-        list(map(int, EnvironmentUtils.get_config_value("SCHEDULE", "exec_time2").split(":")))
+    # SpreadSheetクラスのインスタンス化
+    spreadsheet_settings = env.get_spreadsheet_settings()
+    spreadsheet = SpreadSheet(
+        credentials_path=spreadsheet_settings['credentials_path'],
+        spreadsheet_key=spreadsheet_settings['spreadsheet_key']
     )
     
-    # ログファイルのパスを /log/log.txt に修正
-    log_path = EnvironmentUtils.get_project_root() / "log" / "log.txt"
-    log_manager = LogManager(log_path)
+    # スプレッドシートに接続
+    if not spreadsheet.connect():
+        raise Exception("スプレッドシートへの接続に失敗しました")
     
-    notifier = Notifier(EnvironmentUtils.get_env_var("SLACK_WEBHOOK"))
+    # Loggerクラスのインスタンス化
+    logger = Logger(spreadsheet)
     
-    domain = EnvironmentUtils.get_env_var("ADMIN_URL").replace('https://', '').split('/')[0]
-    spreadsheet_key = EnvironmentUtils.get_env_var("SPREADSHEET_KEY")
-
-    while True:
-        # 実行時間待機（テストモードの場合はスキップ）
-        if not test_mode:
-            print("待機中")
-            scheduler.wait_for_execution_time()
-        else:
-            print("[テストモード] スケジュール待機をスキップします")
-
-        try:
-            print("処理を開始します...")
-            # スプレッドシートの初期化
-            spreadsheet = SpreadSheet(
-                EnvironmentUtils.get_service_account_file(),
-                spreadsheet_key
-            )
-            if not spreadsheet.connect():
-                raise Exception("スプレッドシートへの接続に失敗しました")
-
-            # ブラウザの初期化と操作
-            browser = Browser()
-            browser.setup()
-            browser.login(
-                f"https://{domain}/admin/",
-                {
-                    "id": EnvironmentUtils.get_env_var("BASIC_AUTH_ID"),
-                    "password": EnvironmentUtils.get_env_var("BASIC_AUTH_PASSWORD")
-                },
-                {
-                    "id": EnvironmentUtils.get_env_var("LOGIN_ID"),
-                    "password": EnvironmentUtils.get_env_var("LOGIN_PASSWORD")
-                }
-            )
-
-            # 採用確認ページへ遷移して検索実行
-            if not browser.go_to_adoptions_and_search(test_mode):
-                raise Exception("採用確認ページの遷移または検索に失敗しました")
-
-            # 応募者情報の取得と処理
-            adoption = Adoption(browser.driver, browser.wait)
-            applicants_data = adoption.get_applicants_data()
-            checked_applicants = adoption.apply_checks(applicants_data, log_manager.get_processed_ids())
-
-            # ログの記録とSlack通知
-            if checked_applicants and spreadsheet.append_logs(checked_applicants):
-                notifier.send_slack_notification(
-                    '@channel 採用確認の自動チェックが完了しました！',
-                    spreadsheet_key
-                )
-                log_manager.save_processed_ids(
-                    [applicant["id"] for applicant in checked_applicants]
-                )
-
-        except Exception as e:
-            print(f"エラーが発生しました: {str(e)}")
-        finally:
-            if 'browser' in locals():
-                browser.quit()
-
-        print("実行終了")
+    # セレクター情報の読み込み
+    checker = ApplicantChecker(
+        Path("config/selectors.csv"),
+        Path("config/judge_list.csv")
+    )
+    selectors = checker.get_selectors()
+    
+    # ブラウザ設定の読み込み
+    browser = Browser(
+        settings_path='config/settings.ini',
+        selectors_path='config/selectors.csv'
+    )
+    
+    try:
+        print("\n=== ブラウザテスト開始 ===")
+        print("1. ブラウザを起動中...")
+        browser.setup()
         
-        # テストモードの場合は1回で終了
-        if test_mode:
-            break
-        else:
-            print("60秒後に次の実行を開始します...")
-            time.sleep(60)
+        # ログイン処理
+        print("2. ログイン処理を開始...")
+        login = Login(browser)
+        success, url = login.execute()
+        if not success:
+            raise Exception("ログイン処理に失敗しました")
+
+        print("\n=== 検索処理開始 ===")
+        print("\n3. 採用確認ページへ遷移中...")
+        adoptions_url = f"{url}/adoptions"
+        browser.driver.get(adoptions_url)
+        time.sleep(2)
+
+        # 検索処理
+        search = Search(browser, selectors)
+        if not search.execute():
+            raise Exception("検索処理に失敗しました")
+
+        # 応募者データの処理（セレクター情報を直接渡す）
+        applicants_to_log = browser.process_applicants(checker, env)
+
+        # ログの記録
+        if applicants_to_log:
+            print("\n=== ログ記録処理開始 ===")
+            if not logger.log_applicants(applicants_to_log):
+                raise Exception("ログの記録に失敗しました")
+
+    except Exception as e:
+        print(f"\n❌ エラーが発生しました: {str(e)}")
+        raise
+    finally:
+        # ブラウザを終了
+        if browser and browser.driver:
+            browser.driver.quit()
+            print("\n✅ ブラウザを終了しました")
 
 if __name__ == "__main__":
     import argparse

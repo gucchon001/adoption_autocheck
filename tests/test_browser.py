@@ -83,6 +83,162 @@ def test_browser():
         adoptions_url = f"{url}/adoptions"
         browser.driver.get(adoptions_url)
         
+        # 検索条件の設定と検索実行をテスト
+        print("\n4. 検索条件の設定テスト...")
+        try:
+            # ページが完全に読み込まれるまで待機
+            browser.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "#form_search"
+                ))
+            )
+            time.sleep(1)
+
+            # 提出ステータスの設定
+            status_value = env.get_config_value('SEARCH', 'submit_status', '0')
+            try:
+                if status_value != "0":
+                    # 値が設定されている場合
+                    selector_type = selectors['submit_status']['selector_type'].upper()
+                    selector_value = selectors['submit_status']['selector_value']
+                    
+                    # value属性を動的に設定
+                    if status_value:
+                        selector_value = f"{selector_value}[value='{status_value}']"
+                    
+                    submit_status = browser.wait.until(
+                        EC.element_to_be_clickable((
+                            getattr(By, selector_type),
+                            selector_value
+                        ))
+                    )
+                    submit_status.click()
+                    status_text = {
+                        1: "未提出",
+                        2: "提出中",
+                        3: "差戻し",
+                        4: "完了"
+                    }.get(str(status_value), "不明")
+                    print(f"✅ 提出ステータスを設定: {status_text}")
+                else:
+                    # 指定なしの場合
+                    selector_type = selectors['submit_status']['selector_type'].upper()
+                    selector_value = f"{selectors['submit_status']['selector_value']}[value='']"
+                    submit_status = browser.wait.until(
+                        EC.element_to_be_clickable((
+                            getattr(By, selector_type),
+                            selector_value
+                        ))
+                    )
+                    submit_status.click()
+                    print("✅ 提出ステータス: 指定なし")
+            except Exception as e:
+                print(f"❌ 提出ステータスの設定でエラー: {str(e)}")
+
+            # 提出期限の設定
+            deadline_value = env.get_config_value('SEARCH', 'submit_deadline', '')
+            
+            try:
+                # 文字列の二重引用符を除去して判定
+                cleaned_deadline = deadline_value.strip('"')
+                if cleaned_deadline:
+                    # 値が設定されている場合（今月末または期限超過）のみ処理
+                    selector_type = selectors['submit_deadline']['selector_type'].upper()
+                    selector_value = selectors['submit_deadline']['selector_value']
+                    
+                    if cleaned_deadline != "":
+                        selector_value = f"{selector_value}[value='{cleaned_deadline}']"
+                    
+                    submit_deadline = browser.wait.until(
+                        EC.element_to_be_clickable((
+                            getattr(By, selector_type),
+                            selector_value
+                        ))
+                    )
+                    submit_deadline.click()
+                    deadline_text = {
+                        1: "今月末",
+                        2: "期限超過"
+                    }.get(cleaned_deadline, "不明")
+                    print(f"✅ 提出期限を設定: {deadline_text}")
+                else:
+                    # 指定なしの場合は何もしない（デフォルトで選択済み）
+                    print("✅ 提出期限: 指定なし")
+            except Exception as e:
+                print(f"❌ 提出期限の設定でエラー: {str(e)}")
+
+            # 検索ボタンクリック
+            try:
+                selector_type = selectors['search_button']['selector_type'].upper()
+                selector_value = selectors['search_button']['selector_value']
+                
+                # フォーム検索の完了を待機
+                browser.wait.until(
+                    EC.presence_of_element_located((
+                        getattr(By, selector_type),
+                        "#form_search"
+                    ))
+                )
+                
+                # 検索ボタンが操作可能になるまで待機
+                search_button = browser.wait.until(
+                    EC.element_to_be_clickable((
+                        getattr(By, selector_type),
+                        selector_value
+                    ))
+                )
+                search_button.click()
+                
+                # ローディング表示の消失を待機
+                browser.wait.until(
+                    EC.invisibility_of_element_located((
+                        getattr(By, selector_type),
+                        ".loading"
+                    ))
+                )
+                
+                # テーブルの再読み込みを待機
+                browser.wait.until(
+                    EC.presence_of_element_located((
+                        getattr(By, selector_type),
+                        "#recruitment-list table.table-sm"
+                    ))
+                )
+                print("✅ 検索ボタンをクリックし、結果を読み込み完了")
+            except Exception as e:
+                print(f"❌ 検索ボタンのクリックでエラー: {str(e)}")
+                raise e  # エラーの詳細を確認するために例外を再送出
+            
+            # 検索結果の読み込みを待機（より長い待機時間を設定）
+            browser.wait = WebDriverWait(browser.driver, 20)  # タイムアウトを20秒に延長
+            
+            # まずローディング表示の消失を待機
+            try:
+                loading = browser.wait.until(
+                    EC.invisibility_of_element_located((
+                        By.CSS_SELECTOR, 
+                        ".loading"
+                    ))
+                )
+                print("✅ ローディング完了")
+            except Exception as e:
+                print(f"⚠️ ローディング要素の待機でエラー: {str(e)}")
+
+            # テーブルの読み込みを待機
+            table = browser.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "#recruitment-list table.table-sm"
+                ))
+            )
+            time.sleep(2)  # 追加の待機時間
+            print("✅ テーブルの読み込み完了")
+
+        except Exception as e:
+            print(f"❌ 検索条件の設定でエラー: {str(e)}")
+            raise e
+
         # ページ読み込み完了を待機
         wait = WebDriverWait(browser.driver, 10)
         print("テーブルの読み込みを待機中...")
@@ -96,12 +252,30 @@ def test_browser():
         )
         print("✅ テーブルを取得")
         
-        # tbody内の行を取得
-        rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
-        print(f"取得した行数: {len(rows)}")
+        try:
+            # "該当する採用確認が見つかりませんでした"のメッセージを確認
+            no_data_message = table.find_element(
+                By.CSS_SELECTOR, 
+                "tbody tr td[colspan='10']"
+            ).text.strip()
+            
+            if "該当する採用確認が見つかりませんでした" in no_data_message:
+                print("検索結果が0件のため、処理を終了します")
+                return
+                
+        except Exception as e:
+            # メッセージが見つからない場合は通常の行数チェックを実行
+            rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
+            total_rows = len(rows)
+            record_count = total_rows // 3
+            print(f"取得した行数: {total_rows} (レコード数: {record_count})")
+            
+            if total_rows == 0:
+                print("検索結果が0件のため、処理を終了します")
+                return
         
-        # 5レコード分の情報を取得してパターンマッチング
-        for record_index in range(10):
+        # レコード分の情報を取得してパターンマッチング
+        for record_index in range(record_count):
             record_offset = record_index * 3
             print(f"\n=== {record_index + 1}レコード目の情報取得とパターン分析 ===")
             
@@ -110,29 +284,37 @@ def test_browser():
                 applicant_data = {}
                 
                 # 応募IDを取得
+                selector_type = selectors['applicant_id']['selector_type'].upper()
+                selector_value = selectors['applicant_id']['selector_value']
                 applicant_id = rows[record_offset].find_element(
-                    By.CSS_SELECTOR, selectors['applicant_id']['selector_value']
+                    getattr(By, selector_type), selector_value
                 ).text.strip()
                 applicant_data['id'] = applicant_id
                 print(f"✅ {selectors['applicant_id']['description']}: {applicant_id}")
                 
                 # ステータス取得
+                selector_type = selectors['status']['selector_type'].upper()
+                selector_value = selectors['status']['selector_value']
                 status_select = Select(rows[record_offset].find_element(
-                    By.CSS_SELECTOR, selectors['status']['selector_value']
+                    getattr(By, selector_type), selector_value
                 ))
                 applicant_data['status'] = status_select.first_selected_option.text
                 print(f"✅ {selectors['status']['description']}: {applicant_data['status']}")
                 
                 # 研修初日取得
+                selector_type = selectors['training_start_date']['selector_type'].upper()
+                selector_value = selectors['training_start_date']['selector_value']
                 training_date = rows[record_offset].find_element(
-                    By.CSS_SELECTOR, selectors['training_start_date']['selector_value']
+                    getattr(By, selector_type), selector_value
                 ).text.strip()
                 applicant_data['training_start_date'] = training_date
                 print(f"✅ {selectors['training_start_date']['description']}: {training_date}")
                 
                 # 在籍確認取得
+                selector_type = selectors['zaiseki_ok']['selector_type'].upper()
+                selector_value = selectors['zaiseki_ok']['selector_value']
                 zaiseki_select = Select(rows[record_offset + 1].find_element(
-                    By.CSS_SELECTOR, selectors['zaiseki_ok']['selector_value']
+                    getattr(By, selector_type), selector_value
                 ))
                 applicant_data['zaiseki'] = zaiseki_select.first_selected_option.text
                 print(f"✅ {selectors['zaiseki_ok']['description']}: {applicant_data['zaiseki']}")
@@ -143,9 +325,10 @@ def test_browser():
                     if element in selectors:
                         try:
                             element_info = selectors[element]
+                            selector_type = element_info['selector_type'].upper()
+                            selector_value = element_info['selector_value']
                             element_obj = rows[record_offset + 2].find_element(
-                                By.CSS_SELECTOR, 
-                                element_info['selector_value']
+                                getattr(By, selector_type), selector_value
                             )
                             
                             if key == 'remark':
@@ -261,6 +444,7 @@ def test_browser():
                 
                 # パターンマッチング結果をログ用データに追加
                 log_entry = {
+                    'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),  # タイムスタンプを追加
                     'id': applicant_data['id'],
                     'status': applicant_data['status'],
                     'pattern': str(pattern),
@@ -276,13 +460,19 @@ def test_browser():
                 if pattern != 99:
                     try:
                         # チェックボックスの操作
+                        selector_type = selectors['confirm_checkbox']['selector_type'].upper()
+                        selector_value = selectors['confirm_checkbox']['selector_value']
                         checkbox = rows[record_offset + 2].find_element(
-                            By.CSS_SELECTOR, selectors['confirm_checkbox']['selector_value']
+                            getattr(By, selector_type), selector_value
                         )
                         checkbox.click()
                         log_entry['confirm_checkbox'] = 'チェック'
                         check_changes_made = True
                         print("✅ 確認完了チェックボックスをONに設定")
+                        
+                        # auto_updateの設定を取得して更新状態を設定
+                        auto_update = env.get_config_value('BROWSER', 'auto_update', default=False)
+                        log_entry['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
                         
                     except Exception as e:
                         print(f"❌ チェックボックスの操作に失敗: {str(e)}")
@@ -301,39 +491,73 @@ def test_browser():
         if check_changes_made:
             try:
                 # 更新ボタンクリック
+                selector_type = selectors['update_button']['selector_type'].upper()
+                selector_value = selectors['update_button']['selector_value']
                 update_button = browser.driver.find_element(
-                    By.CSS_SELECTOR, selectors['update_button']['selector_value']
+                    getattr(By, selector_type),
+                    selector_value
                 )
                 update_button.click()
-                browser.wait.until(EC.presence_of_all_elements_located)
-                time.sleep(1)
-                print("✅ 更新ボタンをクリックしました")
+                
+                # モーダルの表示を待機
+                selector_type = selectors['update_confirm_button']['selector_type'].upper()
+                browser.wait.until(
+                    EC.visibility_of_element_located((
+                        getattr(By, selector_type), 
+                        "#modal-confirm_update_application"
+                    ))
+                )
                 
                 # auto_updateの設定をEnvironmentUtilsから取得
                 auto_update = env.get_config_value('BROWSER', 'auto_update', default=False)
                 
-                # 更新状態を設定（この時点で全てのチェック済みエントリに対して設定）
-                for entry in applicants_to_log:
-                    if entry['confirm_checkbox'] == 'チェック':
-                        entry['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
-                
                 if auto_update:
                     # 更新を確定
-                    update_confirm_button = browser.driver.find_element(
-                        By.CSS_SELECTOR, selectors['update_confirm_button']['selector_value']
+                    selector_type = selectors['update_confirm_button']['selector_type'].upper()
+                    selector_value = selectors['update_confirm_button']['selector_value']
+                    update_confirm_button = browser.wait.until(
+                        EC.element_to_be_clickable((
+                            getattr(By, selector_type),
+                            selector_value
+                        ))
                     )
                     update_confirm_button.click()
+                    
+                    # 更新完了を待機（モーダルの消失）
+                    browser.wait.until(
+                        EC.invisibility_of_element_located((
+                            getattr(By, selector_type), 
+                            "#modal-confirm_update_application"
+                        ))
+                    )
                     print("✅ 更新を確定しました")
+                    # 更新確定後にログエントリを更新
+                    for entry in applicants_to_log:
+                        if entry['confirm_checkbox'] == 'チェック':
+                            entry['confirm_onoff'] = '更新'
                 else:
                     # 更新をキャンセル
+                    selector_type = selectors['update_cancel_button']['selector_type'].upper()
+                    selector_value = selectors['update_cancel_button']['selector_value']
                     update_cancel_button = browser.driver.find_element(
-                        By.CSS_SELECTOR, selectors['update_cancel_button']['selector_value']
+                        getattr(By, selector_type),
+                        selector_value
                     )
                     update_cancel_button.click()
                     print("✅ 更新をキャンセルしました")
+                    # キャンセル後にログエントリを更新
+                    for entry in applicants_to_log:
+                        if entry['confirm_checkbox'] == 'チェック':
+                            entry['confirm_onoff'] = '更新キャンセル'
                 
-                browser.wait.until(EC.presence_of_all_elements_located)
-                time.sleep(2.5)
+                # 最終的な要素の読み込み待機
+                browser.wait.until(
+                    EC.presence_of_element_located((
+                        getattr(By, selector_type),
+                        "#recruitment-list"
+                    ))
+                )
+                time.sleep(1)  # 短い待機時間に変更
             except Exception as e:
                 print(f"❌ 更新処理でエラーが発生: {str(e)}")
 

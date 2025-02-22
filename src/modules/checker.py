@@ -37,21 +37,27 @@ class ApplicantChecker:
                     }
         return selectors
 
-    def _load_judge_patterns(self, file_path: Path) -> Dict[str, List[Dict[str, str]]]:
-        """判定パターンファイルを読み込む"""
-        patterns = {}
+    def _load_judge_patterns(self, file_path: Path) -> List[Dict]:
+        """
+        判定パターンファイルを読み込む
+        
+        Args:
+            file_path (Path): 判定パターンファイルのパス
+            
+        Returns:
+            List[Dict]: 判定パターンのリスト
+        """
+        patterns = []
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                pattern_id = row['pattern']
-                if pattern_id not in patterns:
-                    patterns[pattern_id] = []
-                patterns[pattern_id].append({
-                    'oiwai': row['oiwai'].strip('"'),
-                    'remark': row['remark'].strip('"'),
-                    'status': row['status'].strip('"'),
-                    'training_start_date': row['training_start_date'].strip('"'),
-                    'zaiseki': row['zaiseki'].strip('"')
+                patterns.append({
+                    'pattern': int(row['pattern']),
+                    'oiwai': row['oiwai'],
+                    'remark': row['remark'],
+                    'status': row['status'],
+                    'training_start_date': row['training_start_date'],
+                    'zaiseki': row['zaiseki']
                 })
         return patterns
 
@@ -181,6 +187,77 @@ class ApplicantChecker:
             if matches:
                 return True
         return False
+
+    def check_pattern(self, applicant_data: Dict) -> tuple[int, str]:
+        """
+        応募者データのパターンを判定する
+        
+        Args:
+            applicant_data (Dict): 応募者データ
+            
+        Returns:
+            tuple[int, str]: (パターン番号, 判定理由)
+        """
+        # 現在の日付を取得
+        now = datetime.now()
+        
+        for pattern in self.patterns:
+            # ステータスチェック
+            if pattern['status'] != applicant_data['status']:
+                continue
+            
+            # お祝いと備考のチェック
+            if (pattern['oiwai'] != applicant_data['oiwai'] or 
+                pattern['remark'] != applicant_data['remark']):
+                continue
+            
+            # 研修初日のチェック
+            if pattern['training_start_date'] == '{実行月以降}':
+                if applicant_data['training_start_date'] == '未定':
+                    continue
+                try:
+                    training_date = datetime.strptime(
+                        applicant_data['training_start_date'], 
+                        '%Y-%m-%d'
+                    )
+                    if training_date < now:
+                        continue
+                except ValueError:
+                    continue
+                
+            elif pattern['training_start_date'] == '{1ヶ月以上経過}':
+                if applicant_data['training_start_date'] == '未定':
+                    continue
+                try:
+                    training_date = datetime.strptime(
+                        applicant_data['training_start_date'], 
+                        '%Y-%m-%d'
+                    )
+                    one_month_ago = now - relativedelta(months=1)
+                    if training_date > one_month_ago:
+                        continue
+                except ValueError:
+                    continue
+                
+            elif pattern['training_start_date'] and pattern['training_start_date'] != applicant_data['training_start_date']:
+                continue
+            
+            # 在籍確認のチェック
+            if pattern['zaiseki'] and pattern['zaiseki'] != applicant_data['zaiseki']:
+                continue
+            
+            # すべての条件に一致
+            reason = f"パターン{pattern['pattern']}: "
+            reason += f"ステータス({applicant_data['status']})"
+            if applicant_data['training_start_date']:
+                reason += f"・研修初日({applicant_data['training_start_date']})"
+            if applicant_data['zaiseki']:
+                reason += f"・在籍確認({applicant_data['zaiseki']})"
+            
+            return pattern['pattern'], reason
+        
+        # どのパターンにも一致しない場合
+        return 99, "該当するパターンなし"
 
     @staticmethod
     def format_check_result(reason: str) -> str:

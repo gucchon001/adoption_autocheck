@@ -1,5 +1,5 @@
 ```mermaid
-graph TD
+graph TB
     %% 外部システム
     subgraph "外部システム"
         GS[Google Spreadsheet<br/>ログシート]
@@ -9,7 +9,7 @@ graph TD
 
     %% 設定ファイル
     subgraph "設定ファイル"
-        SET[settings.ini]
+        SET[settings.ini<br/>システム設定]
         JSON[data.json<br/>Google API認証]
         SEL[selectors.csv<br/>要素セレクタ]
         JUD[judge_list.csv<br/>判定条件]
@@ -18,10 +18,10 @@ graph TD
 
     %% 内部プロセス
     subgraph "内部プロセス"
-        MAIN[main.py]
-        ENV[EnvironmentUtils]
+        MAIN[main.py<br/>メインプロセス]
+        ENV[EnvironmentUtils<br/>環境設定]
         SCHED[Scheduler<br/>実行時刻制御]
-        BROW[Browser<br/>ChromeDriver & Selenium]
+        BROW[Browser<br/>ChromeDriver]
         LOGIN[Login<br/>認証処理]
         SEARCH[Search<br/>応募者検索]
         CHK[ApplicantChecker<br/>パターン判定]
@@ -55,7 +55,17 @@ graph TD
 
     %% 結果記録・通知
     MAIN -->|ログ記録| LOGGER
-    LOGGER -->|データ記録| GS
-    LOGGER -->|処理ID記録| LOG
-    MAIN -->|結果通知| NOTIF
-    NOTIF -->|通知送信| Slack
+    LOGGER -->|結果記録| GS
+    MAIN -->|通知送信| NOTIF
+    NOTIF -->|結果通知| Slack
+
+    %% スタイル設定
+    classDef default fill:#f4f4f4,stroke:#333,stroke-width:1px
+    classDef external fill:#e4e4e4,stroke:#333,stroke-width:1px
+    classDef config fill:#dadada,stroke:#333,stroke-width:1px
+    classDef process fill:#f0f0f0,stroke:#333,stroke-width:1px
+
+    class GS,Slack,JOB external
+    class SET,JSON,SEL,JUD,LOG config
+    class MAIN,ENV,SCHED,BROW,LOGIN,SEARCH,CHK,LOGGER,NOTIF process
+```

@@ -1,8 +1,7 @@
 ```mermaid
 graph TD
     Start([開始]) --> ReadConfig[設定ファイル読み込み<br>settings.ini]
-    ReadConfig --> ReadLog[処理済IDログ読み込み<br>log.txt]
-    ReadLog --> Auth[Basic認証]
+    ReadConfig --> Auth[Basic認証]
     Auth --> Login[サービスログイン]
     
     Login --> WaitTime{実行時刻か?<br>exec_time1/2}
@@ -14,7 +13,7 @@ graph TD
     SearchApplicants --> CheckLoop{チェック対象あり?}
     CheckLoop -- Yes --> CheckStatus[応募者ステータス確認]
     CheckStatus --> UpdateSheet[スプレッドシート更新]
-    UpdateSheet --> LogUpdate[ログファイル更新]
+    UpdateSheet --> LogUpdate[処理済ID追記]
     LogUpdate --> CheckLoop
     
     CheckLoop -- No --> NotifySlack[Slack通知]

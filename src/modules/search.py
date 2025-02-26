@@ -36,12 +36,32 @@ class Search:
             time.sleep(1)
 
             # 提出ステータスの設定
-            if not self._set_submit_status():
-                return False
+            submit_status = env.get_config_value('SEARCH', 'submit_status', default=0)
+            if submit_status:
+                selector_type = self.selectors['submit_status']['selector_type'].upper()
+                selector_value = f"{self.selectors['submit_status']['selector_value']}[value='{submit_status}']"
+                status_radio = self.browser.wait.until(
+                    EC.element_to_be_clickable((getattr(By, selector_type), selector_value))
+                )
+                status_radio.click()
+                print("✅ 提出ステータスを設定しました")
 
             # 提出期限の設定
-            if not self._set_submit_deadline():
-                return False
+            submit_deadline = env.get_config_value('SEARCH', 'submit_deadline', 0)
+            deadline_text = {
+                0: "指定なし",
+                1: "今月末",
+                2: "期限超過"
+            }.get(submit_deadline, "不明")
+            
+            if submit_deadline:
+                selector_type = self.selectors['submit_deadline']['selector_type'].upper()
+                selector_value = f"{self.selectors['submit_deadline']['selector_value']}[value='{submit_deadline}']"
+                deadline_radio = self.browser.wait.until(
+                    EC.element_to_be_clickable((getattr(By, selector_type), selector_value))
+                )
+                deadline_radio.click()
+                print(f"✅ 提出期限を設定: {deadline_text}")
 
             # 検索ボタンクリック
             if not self._click_search_button():
@@ -82,32 +102,26 @@ class Search:
     def _set_submit_deadline(self):
         """提出期限を設定"""
         try:
-            deadline_value = env.get_config_value('SEARCH', 'submit_deadline', '')
-            cleaned_deadline = deadline_value.strip('"')
+            # 設定値を取得（デフォルト0=指定なし）
+            deadline_value = env.get_config_value('SEARCH', 'submit_deadline', 0)
+            
+            # 要素が存在するまで待機
+            self.browser.wait.until(
+                EC.presence_of_element_located((
+                    By.CSS_SELECTOR, 
+                    "input[name='submission_due']"
+                ))
+            )
+            time.sleep(1)  # 追加の待機時間
 
-            if cleaned_deadline:
-                selector_type = self.selectors['submit_deadline']['selector_type'].upper()
-                selector_value = self.selectors['submit_deadline']['selector_value']
-                
-                if cleaned_deadline != "":
-                    selector_value = f"{selector_value}[value='{cleaned_deadline}']"
-                
-                submit_deadline = self.browser.wait.until(
-                    EC.element_to_be_clickable((
-                        getattr(By, selector_type),
-                        selector_value
-                    ))
-                )
-                submit_deadline.click()
-                
-                deadline_text = {
-                    1: "今月末",
-                    2: "期限超過"
-                }.get(cleaned_deadline, "不明")
-                print(f"✅ 提出期限を設定: {deadline_text}")
-            else:
-                print("✅ 提出期限: 指定なし")
-
+            # JavaScriptを使用して要素をクリック
+            radio_button = self.browser.driver.find_element(
+                By.CSS_SELECTOR, 
+                f"input[name='submission_due'][value='{deadline_value}']"
+            )
+            self.browser.driver.execute_script("arguments[0].click();", radio_button)
+            
+            print("✅ 提出期限を設定しました")
             return True
 
         except Exception as e:

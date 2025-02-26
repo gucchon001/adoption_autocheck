@@ -94,23 +94,22 @@ class Browser:
     def go_to_adoptions(self, test_mode=False):
         """応募者一覧ページへ遷移"""
         try:
-            # 検索条件を含むURLを構築
+            # 基本的なURLパラメータのみ設定
             base_params = {
                 's[order]': '1',
-                'c[submit_status_enum]': '2',
                 'c[admin_check_flag]': 'false'
             }
             
             # URLパラメータの構築
             params = '&'.join([f'{k}={v}' for k, v in base_params.items()])
-            search_url = f"{self.settings.get('URL', 'base_url')}/admin/adoptions?{params}&commit=検索"
+            search_url = f"{self.settings.get('URL', 'base_url')}/admin/adoptions?{params}"
             
             print(f"DEBUG: 応募者一覧ページへ遷移: {search_url}")
             self.driver.get(search_url)
             
             # 要素が読み込まれるまで待機
             self.wait.until(EC.presence_of_all_elements_located)
-            time.sleep(1)
+            time.sleep(2)
             
             print("応募者一覧ページへの遷移完了")
             return True

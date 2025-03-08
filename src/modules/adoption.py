@@ -96,7 +96,7 @@ class Adoption:
                     getattr(By, selector_type), selector_value
                 ).text.strip()
                 applicant_data['id'] = applicant_id
-                self.logger.info(f"応募ID: {applicant_id}")
+                self.logger.info(f"✅ {self.selectors['applicant_id']['description']}: {applicant_id}")
             except Exception as e:
                 self.logger.error(f"❌ 応募IDの取得に失敗: {str(e)}")
                 return None
@@ -163,27 +163,29 @@ class Adoption:
 
             # パターン99以外の場合の処理
             if pattern != 99:
-                try:
-                    # チェックボックスの操作
-                    selector_type = self.selectors['confirm_checkbox']['selector_type'].upper()
-                    selector_value = self.selectors['confirm_checkbox']['selector_value']
-                    checkbox = rows[record_offset + 2].find_element(
-                        getattr(By, selector_type), selector_value
-                    )
-                    checkbox.click()
+                # チェックボックスの操作
+                selector_type = self.selectors['confirm_checkbox']['selector_type'].upper()
+                selector_value = self.selectors['confirm_checkbox']['selector_value']
+                
+                # browser.pyのclick_checkboxメソッドを使用
+                click_success = self.browser.click_checkbox(
+                    rows[record_offset + 2], 
+                    selector_value, 
+                    max_retries=3
+                )
+                
+                if click_success:
                     applicant_data['confirm_checkbox'] = 'チェック'
                     self.check_changes_made = True
-                    self.logger.info("✅ 確認完了チェックボックスをONに設定")
                     
                     # auto_updateの設定を取得して更新状態を設定
                     auto_update = self.env.get_config_value('BROWSER', 'auto_update', default=False)
                     applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
-                    
-                except Exception as e:
-                    self.logger.error(f"❌ チェックボックスの操作に失敗: {str(e)}")
+                else:
+                    applicant_data['confirm_checkbox'] = 'エラー'
 
             return applicant_data
 
         except Exception as e:
             self.logger.error(f"❌ レコード処理でエラー: {str(e)}")
-            return None 
+            return None

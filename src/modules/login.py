@@ -54,7 +54,7 @@ class Login:
             username_field = self.browser.wait.until(
                 EC.element_to_be_clickable((
                     getattr(By, self.browser.selectors['login']['username']['type'].upper()),
-                    self.browser.selectors['login']['username']['value']
+                    self.browser.selectors['login']['username']['selector_value']
                 ))
             )
             username_field.clear()  # 既存の入力をクリア
@@ -65,7 +65,7 @@ class Login:
             password_field = self.browser.wait.until(
                 EC.element_to_be_clickable((
                     getattr(By, self.browser.selectors['login']['password']['type'].upper()),
-                    self.browser.selectors['login']['password']['value']
+                    self.browser.selectors['login']['password']['selector_value']
                 ))
             )
             password_field.clear()  # 既存の入力をクリア
@@ -76,7 +76,7 @@ class Login:
             submit_button = self.browser.wait.until(
                 EC.element_to_be_clickable((
                     getattr(By, self.browser.selectors['login']['submit_button']['type'].upper()),
-                    self.browser.selectors['login']['submit_button']['value']
+                    self.browser.selectors['login']['submit_button']['selector_value']
                 ))
             )
             submit_button.click()
@@ -87,7 +87,7 @@ class Login:
                 heading = self.browser.wait.until(
                     EC.presence_of_element_located((
                         getattr(By, self.browser.selectors['top']['page_heading']['type'].upper()),
-                        self.browser.selectors['top']['page_heading']['value']
+                        self.browser.selectors['top']['page_heading']['selector_value']
                     ))
                 ).text
                 print(f"✅ ログイン成功 - ページ見出し: {heading}")

@@ -10,13 +10,25 @@ graph TD
     
     GetSheet --> SearchApplicants[応募者情報検索]
     
-    SearchApplicants --> CheckLoop{チェック対象あり?}
-    CheckLoop -- Yes --> CheckStatus[応募者ステータス確認]
-    CheckStatus --> UpdateSheet[スプレッドシート更新]
-    UpdateSheet --> LogUpdate[処理済ID追記]
-    LogUpdate --> CheckLoop
+    SearchApplicants --> ProcessPage[現在ページの処理]
     
-    CheckLoop -- No --> NotifySlack[Slack通知]
+    ProcessPage --> CheckLoop{チェック対象あり?}
+    CheckLoop -- Yes --> CheckStatus[応募者ステータス確認]
+    CheckStatus --> ClickCheckbox[チェックボックスクリック]
+    ClickCheckbox --> CheckLoop
+    
+    CheckLoop -- No --> UpdateButton[更新ボタンクリック]
+    UpdateButton --> HasChanges{変更あり?}
+    HasChanges -- Yes --> ConfirmUpdate[更新確定]
+    ConfirmUpdate --> CloseModal[閉じるボタンクリック]
+    HasChanges -- No --> NextPage
+    CloseModal --> NextPage{次ページあり?}
+    
+    NextPage -- Yes --> ClickNextPage[次ページボタンクリック]
+    ClickNextPage --> ProcessPage
+    
+    NextPage -- No --> UpdateSheet[スプレッドシート更新]
+    UpdateSheet --> NotifySlack[Slack通知]
     NotifySlack --> WaitTime
     
     subgraph "ステータス確認条件"

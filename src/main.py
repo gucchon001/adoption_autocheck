@@ -95,60 +95,36 @@ def main(test_mode: bool = False):
         browser.driver.get(adoptions_url)
         time.sleep(2)
 
-        # 繰り返し処理の設定を読み込み
+        # repeat_until_emptyの設定を読み込み
         repeat_until_empty = env.get_config_value('BROWSER', 'repeat_until_empty', False)
-        all_applicants = []
-        first_search = True
-        pattern_counts = Counter()
 
-        while True:
-            if first_search:
-                # 初回のみ検索条件を設定
-                search = Search(browser, selectors)
-                if not search.execute():
-                    raise Exception("検索処理に失敗しました")
-                first_search = False
-            else:
-                # 2回目以降は単純にページをリロード
-                browser.driver.refresh()
-                time.sleep(2)  # ページの読み込みを待機
+        # 検索条件を設定して検索を実行
+        search = Search(browser, selectors)
+        if not search.execute():
+            raise Exception("検索処理に失敗しました")
 
-            # 応募者データの処理
-            applicants_to_log = browser.process_applicants(checker, env)
-            
-            if not applicants_to_log:
-                print("処理対象のデータがありません")
-                break
-                
-            # パターンのカウント
-            for applicant in applicants_to_log:
-                if 'pattern' in applicant:
-                    pattern_counts[applicant['pattern']] += 1
-            
-            all_applicants.extend(applicants_to_log)
-            
-            if not repeat_until_empty:
-                break
-                
-            time.sleep(2)  # 次の処理前に待機
+        # 全ページを処理するループ
+        # process_applicantsメソッドにrepeat_until_emptyを渡す
+        applicants_to_log = browser.process_applicants(checker, env, process_next_page=repeat_until_empty)
 
         # ログの記録（全件まとめて）
-        if all_applicants:
-            if not spreadsheet_logger.log_applicants(all_applicants):
+        if applicants_to_log:
+            if not spreadsheet_logger.log_applicants(applicants_to_log):
                 raise Exception("ログの記録に失敗しました")
-            app_logger.info(f"✅ 全{len(all_applicants)}件の処理が完了しました")
+            app_logger.info(f"✅ 全{len(applicants_to_log)}件の処理が完了しました")
 
             # 成功通知（schedulerの情報を含める）
             if notifier:
                 # パターン99をフィルタリングした統計情報
                 include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+                pattern_counts = Counter(applicant['pattern'] for applicant in applicants_to_log if 'pattern' in applicant)
                 filtered_patterns = {
                     k: v for k, v in pattern_counts.items() 
                     if k != '99' or include_pattern_99
                 }
                 
                 stats = {
-                    'total': len(all_applicants),
+                    'total': len(applicants_to_log),
                     'patterns': filtered_patterns
                 }
                 

@@ -11,6 +11,7 @@ from collections import Counter
 import time
 from pathlib import Path
 from src.utils.logging_config import get_logger
+import traceback
 
 def main(test_mode: bool = False):
     """
@@ -23,6 +24,8 @@ def main(test_mode: bool = False):
     app_logger = get_logger(__name__)
     
     app_logger.info(f"実行モード: {'テスト' if test_mode else '本番'}")
+    
+    browser = None
     
     try:
         # 環境設定の読み込み
@@ -41,12 +44,28 @@ def main(test_mode: bool = False):
         else:
             app_logger.info("スケジューラー無効: 即時実行")
 
-        # SpreadSheetクラスのインスタンス化
-        spreadsheet_settings = env.get_spreadsheet_settings()
-        spreadsheet = SpreadSheet(
-            credentials_path=spreadsheet_settings['credentials_path'],
-            spreadsheet_key=spreadsheet_settings['spreadsheet_key']
-        )
+        # SpreadSheet用のLoggerクラスのインスタンス化
+        spreadsheet_logger = None
+        try:
+            spreadsheet_settings = env.get_spreadsheet_settings()
+            if not spreadsheet_settings or not spreadsheet_settings.get('credentials_path') or not spreadsheet_settings.get('spreadsheet_key'):
+                app_logger.warning("スプレッドシートの設定が不完全です。ロギングは無効化されます。")
+            else:
+                spreadsheet = SpreadSheet(
+                    credentials_path=spreadsheet_settings['credentials_path'],
+                    spreadsheet_key=spreadsheet_settings['spreadsheet_key']
+                )
+                # 接続を確認
+                if spreadsheet.connect():
+                    spreadsheet_logger = Logger(spreadsheet)
+                    app_logger.info("✅ スプレッドシートへの接続に成功しました")
+                else:
+                    app_logger.error("スプレッドシートへの接続に失敗しました")
+                    app_logger.warning("スプレッドシートへの接続なしで処理を続行します")
+        except Exception as e:
+            app_logger.error(f"スプレッドシートへの接続に失敗: {str(e)}")
+            app_logger.warning("スプレッドシートへの接続なしで処理を続行します")
+            # 接続失敗時はエラーを発生させず、Noneのままにする
         
         # Notifierクラスのインスタンス化（schedulerを渡す）
         webhook_url = env.get_env_var('SLACK_WEBHOOK', '')
@@ -57,13 +76,6 @@ def main(test_mode: bool = False):
             notifier = None
         else:
             notifier = Notifier(webhook_url)
-        
-        # スプレッドシートに接続
-        if not spreadsheet.connect():
-            raise Exception("スプレッドシートへの接続に失敗しました")
-        
-        # SpreadSheet用のLoggerクラスのインスタンス化
-        spreadsheet_logger = Logger(spreadsheet)
         
         # セレクター情報の読み込み
         checker = ApplicantChecker(
@@ -77,6 +89,10 @@ def main(test_mode: bool = False):
             settings_path='config/settings.ini',
             selectors_path='config/selectors.csv'
         )
+        
+        # ロガーインスタンスをブラウザに設定（存在する場合のみ）
+        if spreadsheet_logger:
+            browser.logger_instance = spreadsheet_logger
         
         print("\n=== ブラウザテスト開始 ===")
         print("1. ブラウザを起動中...")
@@ -104,50 +120,49 @@ def main(test_mode: bool = False):
             raise Exception("検索処理に失敗しました")
 
         # 全ページを処理するループ
-        # process_applicantsメソッドにrepeat_until_emptyを渡す
         applicants_to_log = browser.process_applicants(checker, env, process_next_page=repeat_until_empty)
+        
+        # 処理結果のログ出力
+        app_logger.info(f"✅ 全{len(applicants_to_log)}件の処理が完了しました")
 
-        # ログの記録（全件まとめて）
-        if applicants_to_log:
-            if not spreadsheet_logger.log_applicants(applicants_to_log):
-                raise Exception("ログの記録に失敗しました")
-            app_logger.info(f"✅ 全{len(applicants_to_log)}件の処理が完了しました")
+        # 成功通知（schedulerの情報を含める）
+        if notifier:
+            # パターン99をフィルタリングした統計情報
+            include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+            pattern_counts = Counter(applicant['pattern'] for applicant in applicants_to_log if 'pattern' in applicant)
+            filtered_patterns = {
+                k: v for k, v in pattern_counts.items() 
+                if k != '99' or include_pattern_99
+            }
+            
+            stats = {
+                'total': len(applicants_to_log),
+                'patterns': filtered_patterns
+            }
+            
+            notifier.send_slack_notification(
+                status="success",
+                stats=stats,
+                spreadsheet_key=env.get_spreadsheet_settings()['spreadsheet_key'],
+                test_mode=test_mode,
+                scheduler=scheduler  # schedulerを追加
+            )
 
-            # 成功通知（schedulerの情報を含める）
-            if notifier:
-                # パターン99をフィルタリングした統計情報
-                include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
-                pattern_counts = Counter(applicant['pattern'] for applicant in applicants_to_log if 'pattern' in applicant)
-                filtered_patterns = {
-                    k: v for k, v in pattern_counts.items() 
-                    if k != '99' or include_pattern_99
-                }
-                
-                stats = {
-                    'total': len(applicants_to_log),
-                    'patterns': filtered_patterns
-                }
-                
-                notifier.send_slack_notification(
-                    status="success",
-                    stats=stats,
-                    spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
-                    test_mode=test_mode,
-                    scheduler=scheduler  # schedulerを追加
-                )
-
+        return True
+        
     except Exception as e:
         app_logger.error(f"❌ エラーが発生しました: {str(e)}")
+        traceback.print_exc()
         # エラー通知
         if notifier:
             notifier.send_slack_notification(
                 status="error",
                 error_message=str(e),
-                spreadsheet_key=spreadsheet_settings['spreadsheet_key'],
+                spreadsheet_key=env.get_spreadsheet_settings()['spreadsheet_key'],
                 test_mode=test_mode,
                 scheduler=scheduler  # schedulerを追加
             )
-        raise
+        return False
     finally:
         # ブラウザを終了
         if browser and browser.driver:

@@ -68,10 +68,13 @@ class Search:
             )
             time.sleep(1)
 
+            # 値が0の場合は空文字列に変換（指定なし）
+            status_selector_value = "" if int(status_value) == 0 else str(status_value)
+            
             # JavaScriptを使用して要素をクリック
             radio_button = self.browser.driver.find_element(
                 By.CSS_SELECTOR, 
-                f"input[name='submission_status'][value='{status_value}']"
+                f"input[name='submission_status'][value='{status_selector_value}']"
             )
             self.browser.driver.execute_script("arguments[0].click();", radio_button)
             

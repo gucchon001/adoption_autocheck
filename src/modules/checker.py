@@ -49,6 +49,9 @@ class ApplicantChecker:
         Returns:
             List[Dict]: 判定パターンのリスト
         """
+        # 注: 判定パターンファイルのカラム名と内部変数名の対応
+        # 'remark'(CSV) -> 'admin_memo'(コード内変数)
+        # この変換により、コード内で管理者メモは一貫して'admin_memo'として扱う
         patterns = []
         with open(file_path, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
@@ -56,7 +59,7 @@ class ApplicantChecker:
                 patterns.append({
                     'pattern': int(row['pattern']),
                     'oiwai': row['oiwai'],
-                    'remark': row['remark'],
+                    'admin_memo': row['remark'],  # CSVファイルのカラム名は'remark'だが、内部的には'admin_memo'として扱う
                     'status': row['status'],
                     'training_start_date': row['training_start_date'],
                     'zaiseki': row['zaiseki']
@@ -132,7 +135,7 @@ class ApplicantChecker:
         # 各パターンのチェック
         values = {
             'oiwai': applicant['celebration_sent'],
-            'remark': applicant['admin_memo'],
+            'admin_memo': applicant['admin_memo'],
             'status': applicant['status'],
             'training_start_date': applicant['training_date'],
             'zaiseki': applicant['attendance_check']

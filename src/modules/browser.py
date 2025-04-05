@@ -546,6 +546,13 @@ class Browser:
             applicant_data['pattern_reason'] = reason
             self.logger.info(f"DEBUG: browser.py - パターン判定結果設定: パターン={pattern}, 理由={reason}")
             
+            # 備考欄が設定されていない場合は空文字を設定
+            if 'memo' not in applicant_data:
+                applicant_data['memo'] = ''
+                self.logger.info("備考欄(memo): 未設定のため空文字を設定")
+            else:
+                self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
+            
             # チェックボックスをクリック
             if not adoption.check_single_record(rows, 0):
                 self.logger.warning(f"応募ID: {app_id} のチェックに失敗しました")

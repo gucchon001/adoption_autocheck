@@ -129,9 +129,9 @@ class Adoption:
             applicant_data['zaiseki'] = zaiseki_select.first_selected_option.text
             self.logger.info(f"✅ {self.selectors['zaiseki_ok']['description']}: {applicant_data['zaiseki']}")
             
-            # 3行目の要素を取得（お祝い、備考）
+            # 3行目の要素を取得（お祝い、パターン判定理由、管理者メモなど）
             self.logger.info("\n【3行目】")
-            for element, key in [('celebration', 'oiwai'), ('pattern_reason', 'pattern_reason')]:
+            for element, key in [('celebration', 'oiwai'), ('pattern_reason', 'pattern_reason'), ('memo', 'memo')]:
                 if element in self.selectors:
                     try:
                         element_info = self.selectors[element]
@@ -141,7 +141,8 @@ class Adoption:
                             getattr(By, selector_type), selector_value
                         )
                         
-                        if key == 'pattern_reason':
+                        if key == 'pattern_reason' or key == 'memo':
+                            # パターン判定理由と備考欄はボタンのテキストを取得
                             value = element_obj.text.strip() if element_obj.text.strip() else ''
                         else:
                             value = element_obj.text if element_info['action_type'] == 'get_text' else ''
@@ -160,13 +161,17 @@ class Adoption:
             # パターン情報を追加
             applicant_data['pattern'] = str(pattern)
             
-            # パターン判定理由を追加
+            # パターン判定理由を追加（pattern_reason - パターン判定の結果を格納）
             self.logger.info(f"DEBUG: adoption.py - パターン判定理由を設定前の値: {applicant_data.get('pattern_reason', '未設定')}")
             applicant_data['pattern_reason'] = reason
             self.logger.info(f"DEBUG: adoption.py - パターン判定理由を設定後 -> key: 'pattern_reason', value: '{applicant_data['pattern_reason']}'")
             
-            # 空の備考を追加
-            applicant_data['memo'] = ''
+            # 備考欄が設定されていない場合は空文字を設定（memo - ユーザーが入力する備考欄）
+            if 'memo' not in applicant_data:
+                applicant_data['memo'] = ''
+                self.logger.info("備考欄(memo): 未設定のため空文字を設定")
+            else:
+                self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
             
             # お祝いフラグが未設定の場合は空文字で初期化
             if 'oiwai' not in applicant_data:
@@ -287,6 +292,30 @@ class Adoption:
                 except Exception as e:
                     self.logger.warning(f"在籍確認の取得に失敗: {str(e)}")
                     applicant_data['zaiseki'] = ''
+            
+            # 備考欄取得（memo - ユーザーが入力するフリーテキスト）
+            try:
+                if 'memo' in self.selectors:
+                    selector_type = self.selectors['memo']['selector_type'].upper()
+                    selector_value = self.selectors['memo']['selector_value']
+                    if row_index + 2 < len(rows):  # 3行目が存在する場合
+                        memo_element = rows[row_index + 2].find_element(
+                            getattr(By, selector_type), selector_value
+                        )
+                        # ボタン要素からテキスト取得（get_attributeではなく.textを使用）
+                        memo_text = memo_element.text.strip()
+                        applicant_data['memo'] = memo_text
+                        self.logger.info(f"✅ {self.selectors['memo']['description']}(memo): {memo_text}")
+                    else:
+                        applicant_data['memo'] = ''
+                        self.logger.warning("備考欄(memo)取得のための3行目が存在しません")
+                else:
+                    applicant_data['memo'] = ''
+                    self.logger.warning("備考欄(memo)のセレクター定義がありません")
+            except Exception as e:
+                self.logger.warning(f"備考欄(memo)の取得に失敗: {str(e)}")
+                self.logger.warning(f"エラーの詳細: {traceback.format_exc()}")
+                applicant_data['memo'] = ''
             
             return applicant_data
             

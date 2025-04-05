@@ -405,7 +405,9 @@ class Browser:
                 
                 # ステップ2: 収集した応募IDを一つずつ処理
                 for app_id in application_ids:
-                    self._process_single_application_id(app_id, checker, env, adoption)
+                    result, applicant_data = self._process_single_application_id(app_id, checker, env, adoption)
+                    if result and applicant_data:
+                        all_processed_applicants.append(applicant_data)
                 
                 # ステップ3: 初期検索条件に戻る（応募IDを指定せずに検索）
                 if not self._search_by_application_id():
@@ -431,6 +433,7 @@ class Browser:
                     break
             
             self.logger.info(f"✅ 全ての処理が完了しました")
+            self.logger.info(f"処理したデータ件数: {len(all_processed_applicants)}")
             return all_processed_applicants
             
         except Exception as e:
@@ -517,13 +520,13 @@ class Browser:
             # 応募IDで検索
             if not self._search_by_application_id(app_id):
                 self.logger.warning(f"応募ID: {app_id} の検索に失敗しました")
-                return False
+                return False, None
             
             # 検索結果の確認
             has_data, record_count = adoption.check_search_results()
             if not has_data or record_count == 0:
                 self.logger.warning(f"応募ID: {app_id} の検索結果がありません")
-                return False
+                return False, None
             
             # テーブルの取得
             table = self.wait.until(
@@ -538,7 +541,7 @@ class Browser:
             applicant_data = adoption.get_applicant_info(rows, 0)
             if not applicant_data:
                 self.logger.warning(f"応募ID: {app_id} のデータ取得に失敗しました")
-                return False
+                return False, None
             
             # パターン判定を行う
             pattern, reason = checker.check_pattern(applicant_data)
@@ -556,7 +559,7 @@ class Browser:
             # チェックボックスをクリック
             if not adoption.check_single_record(rows, 0):
                 self.logger.warning(f"応募ID: {app_id} のチェックに失敗しました")
-                return False
+                return False, None
             
             # チェックボックスがクリックされたことを記録
             applicant_data['confirm_checkbox'] = 'チェック'
@@ -565,7 +568,7 @@ class Browser:
             auto_update = env.get_config_value('BROWSER', 'auto_update', False)
             if not self._click_update_button(auto_update):
                 self.logger.warning(f"応募ID: {app_id} の更新に失敗しました")
-                return False
+                return False, None
             
             # 更新状態を記録
             applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
@@ -586,12 +589,12 @@ class Browser:
                     self.logger.error(f"ログ記録中にエラーが発生: {str(log_error)}")
             
             self.logger.info(f"応募ID: {app_id} の処理が完了しました")
-            return True
+            return True, applicant_data
             
         except Exception as e:
             self.logger.error(f"❌ 応募ID: {app_id} の処理でエラー: {str(e)}")
             traceback.print_exc()  # スタックトレースを出力
-            return False
+            return False, None
 
     def _search_by_application_id(self, application_id=None):
         """

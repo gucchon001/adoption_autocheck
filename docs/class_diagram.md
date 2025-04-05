@@ -20,7 +20,7 @@ classDiagram
         -credentials_path: string
         -spreadsheet_key: string
         +connect() bool
-        +update_data(data: list) bool
+        +get_last_row() int
     }
 
     class Browser {
@@ -28,27 +28,43 @@ classDiagram
         -selectors_path: string
         +setup() void
         +driver: WebDriver
+        +process_applicants(checker: ApplicantChecker, env: EnvironmentUtils, process_next_page: bool) list
+        +_process_by_application_id(...)
+        +_process_by_batch(...)
+        +_process_single_application_id(...) tuple[bool, dict]
     }
 
     class Login {
         -browser: Browser
         +execute() (bool, string)
     }
-
-    class ApplicantChecker {
-        -selectors: list
-        -judge_list: list
-        +get_selectors() list
-        +check(applicant: dict) bool
+    
+    class Search {
+        -browser: Browser
+        +execute() bool
     }
 
-    class Search {
-        +execute_search() list
+    class ApplicantChecker {
+        -selectors: dict
+        -patterns: list
+        +get_selectors() dict
+        +check_pattern(applicant_data: dict) tuple[int, str]
+        +should_check_applicant(applicant: dict) Optional[str]
+    }
+    
+    class Adoption {
+        -browser: Browser
+        -selectors: dict
+        -checker: ApplicantChecker
+        +process_record(rows: list, record_index: int) dict
+        +get_applicant_info(rows: list, record_index: int) dict
+        +check_single_record(rows: list, record_index: int) bool
     }
 
     class Logger {
         -spreadsheet: SpreadSheet
         +log_applicants(applicants: list) bool
+        +log_single_applicant(applicant_data: dict) bool
     }
 
     class Notifier {
@@ -63,18 +79,20 @@ classDiagram
     %% Relationships
     Main --> EnvironmentUtils : loads config
     Main --> Scheduler : creates instance
-    Main --> SpreadSheet : uses for logging
+    Main --> SpreadSheet : creates instance for Logger
     Main --> Browser : instantiates
-    Main --> Login : performs authentication
-    Main --> ApplicantChecker : validates applicant data
-    Main --> Search : executes search
-    Main --> Logger : records logs
+    Main --> Login : uses for authentication
+    Main --> Search : uses for searching
+    Main --> ApplicantChecker : uses for checking
+    Main --> Logger : creates instance
     Main --> Notifier : sends notifications
 
-    EnvironmentUtils ..> Scheduler : provides config
-    EnvironmentUtils ..> SpreadSheet : provides config
-    Scheduler --> Notifier : schedules notifications
-    Login --> Browser : utilizes browser instance
+    Browser --> Adoption : uses for applicant processing
+    Browser --> Login : uses for authentication
+    Browser --> Search : uses for searching
+    Browser --> Logger : passes logger instance
+    Adoption --> ApplicantChecker : uses for pattern check
+    Adoption --> Browser : interacts with browser driver
     Logger --> SpreadSheet : logs data into
     Notifier --> Scheduler : includes schedule info 
 ```

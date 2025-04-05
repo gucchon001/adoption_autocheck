@@ -1,51 +1,60 @@
 ```mermaid
 sequenceDiagram
     participant User as ユーザ
-    participant Main as メインプロセス
+    participant Main as メインプロセス (main.py)
     participant Env as 環境設定ファイル
     participant Log as ログファイル
     participant Scheduler as スケジューラー
-    participant Browser as ブラウザ (ChromeDriver)
-    participant Auth as 認証モジュール
-    participant Service as 求人サービス
-    participant Checker as 応募者チェック処理
+    participant Browser as ブラウザ (browser.py)
+    participant Adoption as 応募者処理 (adoption.py)
+    participant Checker as 判定処理 (checker.py)
+    participant SheetLogger as スプレッドシートロガー (logger.py)
     participant Sheet as スプレッドシート
+    participant Notifier as 通知処理 (notifications.py)
     participant Slack as Slack
 
     User->>Main: システム起動
     Main->>Env: 設定読み込み
-    Main->>Log: 処理済ID読み込み
     Main->>Scheduler: 実行時刻待機開始
+    Scheduler->>Main: 実行時刻まで待機
 
-    loop 実行時刻待機
-        Scheduler->>Main: 現在時刻チェック
+    Main->>Browser: ブラウザ起動、ログイン
+    Browser-->>Main: ログイン成功
+
+    Main->>Browser: 応募者処理開始 (process_applicants)
+    Browser->>Adoption: 応募者データ取得・処理ループ開始
+    Adoption->>Checker: パターン判定
+    Checker-->>Adoption: パターン結果
+    Adoption->>Browser: 個別処理 (check_single_record)
+    Browser->>Adoption: チェックボックス操作
+    Adoption-->>Browser: 応募者データ
+
+    alt 応募ID個別処理モード (process_by_id = true)
+        Adoption->>SheetLogger: ログ記録 (log_single_applicant)
+        SheetLogger->>Sheet: データ書き込み
+        Sheet-->>SheetLogger: 記録完了
+        SheetLogger-->>Adoption: 記録完了
+        Browser-->>Main: 処理済み応募者リスト
+    else 一括処理モード (process_by_id = false)
+        Adoption-->>Browser: 応募者データ
+        Browser->>SheetLogger: ログ記録 (log_applicants)
+        SheetLogger->>Sheet: データ書き込み
+        Sheet-->>SheetLogger: 記録完了
+        SheetLogger-->>Browser: 記録完了
+        Browser-->>Main: 処理済み応募者リスト
     end
 
-    Main->>Browser: ChromeDriver起動
-    Main->>Auth: Basic認証 & サービスログイン
-    Auth-->>Main: 認証成功
-
-    loop 応募者処理ループ
-        Main->>Service: 応募者情報取得リクエスト
-        Service-->>Main: 応募者データ
-        Main->>Checker: ステータス・条件評価
-        alt 条件合致の場合
-            Checker-->>Main: 判定結果: 合致
-            Main->>Sheet: 最終行取得
-            Sheet-->>Main: 行数取得
-            Main->>Sheet: 結果記録
-            Main->>Log: 処理済ID追記
-        else 条件不合致の場合
-            Checker-->>Main: 判定結果: 不合致 (スキップ)
-        end
-    end
-
-    Main->>Slack: 結果通知送信
-    Slack-->>Main: 通知完了
+    Main->>Notifier: Slack通知送信 (send_slack_notification)
+    Notifier->>Slack: 通知送信
+    Slack-->>Notifier: 通知完了
+    Notifier-->>Main: 通知完了
 
     alt エラー発生時
         Main->>Log: エラーログ記録
-        Main->>Main: リトライ処理
+        Main->>Notifier: Slackエラー通知送信
+        Notifier->>Slack: エラー通知送信
+        Slack-->>Notifier: 通知完了
+        Notifier-->>Main: 通知完了
     end
 ```
 ```    

@@ -6,38 +6,36 @@ graph TD
     
     Login --> WaitTime{実行時刻か?<br>exec_time1/2}
     WaitTime -- No --> WaitTime
-    WaitTime -- Yes --> GetSheet[スプレッドシート<br>最終行取得]
+    WaitTime -- Yes --> SearchApplicants[応募者情報検索]
     
-    GetSheet --> SearchApplicants[応募者情報検索]
+    SearchApplicants --> ProcessPage[ページ処理開始]
     
-    SearchApplicants --> ProcessPage[現在ページの処理]
+    subgraph ページ処理
+        ProcessPage --> GetApplicantData["応募者データ取得 (Adoption)"]
+        GetApplicantData --> CheckPattern["パターン判定 (Checker)"]
+        CheckPattern --> ProcessRecord["レコード処理 (Adoption)"]
+        ProcessRecord --> ClickCheckbox["チェックボックス操作 (Browser)"]
+        ClickCheckbox --> HasMoreApplicants{次の応募者あり?}
+        HasMoreApplicants -- Yes --> GetApplicantData
+        HasMoreApplicants -- No --> UpdatePage["更新処理 (Browser)"]
+    end
     
-    ProcessPage --> CheckLoop{チェック対象あり?}
-    CheckLoop -- Yes --> CheckStatus[応募者ステータス確認]
-    CheckStatus --> ClickCheckbox[チェックボックスクリック]
-    ClickCheckbox --> CheckLoop
+    UpdatePage --> CheckNextPage{次ページあり?}
+    CheckNextPage -- Yes --> GoToNextPage[次ページへ移動]
+    GoToNextPage --> ProcessPage
     
-    CheckLoop -- No --> UpdateButton[更新ボタンクリック]
-    UpdateButton --> HasChanges{変更あり?}
-    HasChanges -- Yes --> ConfirmUpdate[更新確定]
-    ConfirmUpdate --> CloseModal[閉じるボタンクリック]
-    HasChanges -- No --> NextPage
-    CloseModal --> NextPage{次ページあり?}
-    
-    NextPage -- Yes --> ClickNextPage[次ページボタンクリック]
-    ClickNextPage --> ProcessPage
-    
-    NextPage -- No --> UpdateSheet[スプレッドシート更新]
-    UpdateSheet --> NotifySlack[Slack通知]
+    CheckNextPage -- No --> CollectResults[全結果収集]
+    CollectResults --> NotifySlack[Slack通知]
     NotifySlack --> WaitTime
     
     subgraph "ステータス確認条件"
-        CheckStatus --> IsAdopted{採用?}
-        IsAdopted -- Yes --> CheckAdoptCond[採用条件確認<br>- 研修初日<br>- 在籍確認<br>- 採用お祝い]
-        IsAdopted -- No --> CheckOtherStatus[他ステータス確認<br>保留/不合格/連絡取れず<br>辞退/欠席]
+        ClickCheckbox --> IsAdopted{採用?}
+        IsAdopted -- Yes --> CheckAdoptCond["採用条件確認<br>- 研修初日<br>- 在籍確認<br>- 採用お祝い"]
+        IsAdopted -- No --> CheckOtherStatus["他ステータス確認<br>保留/不合格/連絡取れず<br>辞退/欠席"]
         
         CheckAdoptCond -- 条件合致 --> NeedCheck[要チェック]
         CheckOtherStatus -- 条件合致 --> NeedCheck
         CheckAdoptCond -- 条件不一致 --> NoCheck[チェック不要]
-        CheckOtherStatus -- 条件不一致 --> NoCheck
+        CheckOtherStatus -- 条件不一致 --> NoCheck[チェック不要]
     end 
+```

@@ -131,7 +131,7 @@ class Adoption:
             
             # 3行目の要素を取得（お祝い、備考）
             self.logger.info("\n【3行目】")
-            for element, key in [('celebration', 'oiwai'), ('remark', 'remark')]:
+            for element, key in [('celebration', 'oiwai'), ('pattern_reason', 'pattern_reason')]:
                 if element in self.selectors:
                     try:
                         element_info = self.selectors[element]
@@ -141,7 +141,7 @@ class Adoption:
                             getattr(By, selector_type), selector_value
                         )
                         
-                        if key == 'remark':
+                        if key == 'pattern_reason':
                             value = element_obj.text.strip() if element_obj.text.strip() else ''
                         else:
                             value = element_obj.text if element_info['action_type'] == 'get_text' else ''
@@ -159,6 +159,19 @@ class Adoption:
             
             # パターン情報を追加
             applicant_data['pattern'] = str(pattern)
+            
+            # パターン判定理由を追加
+            self.logger.info(f"DEBUG: adoption.py - パターン判定理由を設定前の値: {applicant_data.get('pattern_reason', '未設定')}")
+            applicant_data['pattern_reason'] = reason
+            self.logger.info(f"DEBUG: adoption.py - パターン判定理由を設定後 -> key: 'pattern_reason', value: '{applicant_data['pattern_reason']}'")
+            
+            # 空の備考を追加
+            applicant_data['memo'] = ''
+            
+            # お祝いフラグが未設定の場合は空文字で初期化
+            if 'oiwai' not in applicant_data:
+                applicant_data['oiwai'] = ''
+            
             applicant_data['confirm_checkbox'] = ''
             applicant_data['confirm_onoff'] = ''
 
@@ -348,95 +361,3 @@ class Adoption:
             self.logger.error(f"単一レコードのチェックでエラー: {str(e)}")
             traceback.print_exc()  # スタックトレースを出力
             return False
-
-    def _process_single_application_id(self, app_id, checker, env, adoption):
-        """
-        単一の応募IDを処理
-        
-        Args:
-            app_id: 処理対象の応募ID
-            checker: ApplicantCheckerクラスのインスタンス
-            env: EnvironmentUtilsクラス
-            adoption: Adoptionクラスのインスタンス
-            
-        Returns:
-            dict: 処理した応募者データ（処理失敗時はNone）
-        """
-        try:
-            self.logger.info(f"応募ID: {app_id} の処理を開始")
-            
-            # 応募IDで検索
-            if not self._search_by_application_id(app_id):
-                self.logger.warning(f"応募ID: {app_id} の検索に失敗しました")
-                return None
-            
-            # 検索結果の確認
-            has_data, record_count = adoption.check_search_results()
-            if not has_data or record_count == 0:
-                self.logger.warning(f"応募ID: {app_id} の検索結果がありません")
-                return None
-            
-            # テーブルから行を取得
-            table = self.browser.driver.find_element(By.CSS_SELECTOR, "#recruitment-list table.table-sm")
-            rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
-            
-            # 応募者情報の取得
-            applicant_data = adoption.process_record(rows, 0)
-            if not applicant_data:
-                self.logger.warning(f"応募ID: {app_id} の情報取得に失敗しました")
-                return None
-            
-            # パターン判定
-            pattern = checker.check_pattern(applicant_data)
-            applicant_data['pattern'] = pattern
-            
-            # パターンに応じた処理
-            if pattern != '99':  # パターン99以外は処理を実行
-                # チェックボックスをクリック
-                if adoption.check_single_record(rows, 0):
-                    # 更新ボタンをクリック
-                    if self._click_update_button():
-                        # 更新確定ボタンをクリック
-                        if self._click_confirm_button():
-                            applicant_data['confirm_checkbox'] = 'ON'
-                            applicant_data['confirm_onoff'] = 'ON'
-                            self.logger.info(f"応募ID: {app_id} の更新が完了しました")
-                        else:
-                            applicant_data['confirm_checkbox'] = 'ON'
-                            applicant_data['confirm_onoff'] = 'OFF'
-                            self.logger.warning(f"応募ID: {app_id} の更新確定に失敗しました")
-                    else:
-                        applicant_data['confirm_checkbox'] = 'ON'
-                        applicant_data['confirm_onoff'] = 'OFF'
-                        self.logger.warning(f"応募ID: {app_id} の更新ボタンクリックに失敗しました")
-                else:
-                    applicant_data['confirm_checkbox'] = 'OFF'
-                    applicant_data['confirm_onoff'] = 'OFF'
-                    self.logger.warning(f"応募ID: {app_id} のチェックボックスクリックに失敗しました")
-            else:
-                # パターン99は処理しない
-                applicant_data['confirm_checkbox'] = '-'
-                applicant_data['confirm_onoff'] = '-'
-                self.logger.info(f"応募ID: {app_id} はパターン99のため処理をスキップします")
-            
-            # 閉じるボタンをクリック
-            self._click_close_button()
-            
-            # ログに記録
-            if hasattr(self, 'logger_instance') and self.logger_instance:
-                try:
-                    log_success = self.logger_instance.log_single_applicant(applicant_data)
-                    if log_success:
-                        self.logger.info(f"応募ID: {app_id} のデータをログに記録しました")
-                    else:
-                        self.logger.warning(f"応募ID: {app_id} のデータのログ記録に失敗しました")
-                except Exception as log_error:
-                    self.logger.error(f"ログ記録中にエラーが発生: {str(log_error)}")
-                    # エラーが発生しても処理は続行
-            
-            self.logger.info(f"応募ID: {app_id} の処理が完了しました")
-            return applicant_data
-            
-        except Exception as e:
-            self.logger.error(f"応募ID: {app_id} の処理でエラー: {str(e)}")
-            return None

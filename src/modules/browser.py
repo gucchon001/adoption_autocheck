@@ -543,7 +543,8 @@ class Browser:
             # パターン判定を行う
             pattern, reason = checker.check_pattern(applicant_data)
             applicant_data['pattern'] = str(pattern)
-            applicant_data['remark'] = reason
+            applicant_data['pattern_reason'] = reason
+            self.logger.info(f"DEBUG: browser.py - パターン判定結果設定: パターン={pattern}, 理由={reason}")
             
             # チェックボックスをクリック
             if not adoption.check_single_record(rows, 0):

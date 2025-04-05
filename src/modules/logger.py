@@ -66,8 +66,9 @@ class Logger:
                     applicant['id'],        # 応募ID
                     applicant['status'],    # 採用ステータス
                     applicant.get('pattern', ''),   # パターン
+                    applicant.get('pattern_reason', ''),    # パターン判定理由
                     applicant.get('oiwai', ''),     # お祝いフラグ
-                    applicant.get('remark', ''),    # 備考
+                    applicant.get('memo', ''),      # 備考
                     applicant['training_start_date'],  # 研修初日
                     applicant['zaiseki'],   # 在籍確認
                     applicant.get('confirm_checkbox', ''),     # 確認完了チェックボックス
@@ -75,7 +76,15 @@ class Logger:
                 ]
                 for i, applicant in enumerate(filtered_data)
             ]
-
+            
+            # デバッグ情報
+            for i, applicant in enumerate(filtered_data):
+                self.logger.info(f"DEBUG: logger.py:log_applicants - 応募ID: {applicant['id']} のデータ:")
+                self.logger.info(f"  - パターン: {applicant.get('pattern', '未設定')}")
+                self.logger.info(f"  - パターン判定理由: {applicant.get('pattern_reason', '未設定')}")
+                self.logger.info(f"  - お祝いフラグ: {applicant.get('oiwai', '未設定')}")
+                self.logger.info(f"  - ステータス: {applicant.get('status', '未設定')}")
+            
             # スプレッドシートに追加
             try:
                 self.spreadsheet.sheet.append_rows(log_data)
@@ -142,14 +151,22 @@ class Logger:
                     applicant_data['id'],        # 応募ID
                     applicant_data['status'],    # 採用ステータス
                     applicant_data.get('pattern', ''),   # パターン
+                    applicant_data.get('pattern_reason', ''),    # パターン判定理由
                     applicant_data.get('oiwai', ''),     # お祝いフラグ
-                    applicant_data.get('remark', ''),    # 備考
+                    applicant_data.get('memo', ''),      # 備考
                     applicant_data['training_start_date'],  # 研修初日
                     applicant_data['zaiseki'],   # 在籍確認
                     applicant_data.get('confirm_checkbox', ''),     # 確認完了チェックボックス
                     applicant_data.get('confirm_onoff', '')        # 更新反映状態
                 ]
             ]
+            
+            # デバッグ情報
+            self.logger.info(f"DEBUG: logger.py:log_single_applicant - 応募ID: {applicant_data['id']} のデータ:")
+            self.logger.info(f"  - パターン: {applicant_data.get('pattern', '未設定')}")
+            self.logger.info(f"  - パターン判定理由: {applicant_data.get('pattern_reason', '未設定')}")
+            self.logger.info(f"  - お祝いフラグ: {applicant_data.get('oiwai', '未設定')}")
+            self.logger.info(f"  - ステータス: {applicant_data.get('status', '未設定')}")
             
             # スプレッドシートに追加
             try:
@@ -170,7 +187,7 @@ class Logger:
         except Exception as e:
             self.logger.error(f"❌ 単一応募者データのログ記録処理でエラー: {str(e)}")
             traceback.print_exc()  # スタックトレースを出力
-            return False 
+            return False
 
     def connect(self) -> bool:
         """

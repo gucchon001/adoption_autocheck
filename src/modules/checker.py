@@ -213,6 +213,7 @@ class ApplicantChecker:
         if applicant_data['status'] in ['保留', '不合格', '連絡取れず', '辞退', '欠席']:
             reason = f"ステータス: {applicant_data['status']}"
             self.logger.info(f"パターン1と判定: {reason}")
+            self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {1}, 理由: {reason}")
             return 1, reason
             
         # 採用の場合のパターン判定
@@ -220,25 +221,34 @@ class ApplicantChecker:
             # パターン2: 研修日未定
             if applicant_data['training_start_date'] == '未定':
                 self.logger.info("パターン2と判定: 研修日未定")
-                return 2, "研修日未定・在籍確認未実施"
+                reason = "研修日未定・在籍確認未実施"
+                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {2}, 理由: {reason}")
+                return 2, reason
                 
             training_date = self._parse_date(applicant_data['training_start_date'])
             if not training_date:
                 self.logger.info("パターン99と判定: 研修日のパース失敗")
-                return 99, "研修日の形式が不正"
+                reason = "研修日の形式が不正"
+                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {99}, 理由: {reason}")
+                return 99, reason
                 
             # パターン3: 実行月以降
             if training_date >= now:
                 self.logger.info("パターン3と判定: 研修日が実行月以降")
-                return 3, "研修日が実行月以降・在籍確認未実施"
+                reason = "研修日が実行月以降・在籍確認未実施"
+                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {3}, 理由: {reason}")
+                return 3, reason
                 
             # パターン4: 1ヶ月以上経過
             one_month_ago = now - relativedelta(months=1)
             if training_date <= one_month_ago and applicant_data['zaiseki'] == '〇':
                 self.logger.info("パターン4と判定: 1ヶ月以上経過・在籍確認済み")
-                return 4, "研修日から1ヶ月以上経過・在籍確認済み"
+                reason = "研修日から1ヶ月以上経過・在籍確認済み"
+                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {4}, 理由: {reason}")
+                return 4, reason
         
         self.logger.info("パターン99と判定: 該当するパターンなし")
+        self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {99}, 理由: {'該当するパターンなし'}")
         return 99, "該当するパターンなし"
 
     @staticmethod

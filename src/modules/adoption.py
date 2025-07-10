@@ -112,13 +112,24 @@ class Adoption:
             self.logger.info(f"✅ {self.selectors['status']['description']}: {applicant_data['status']}")
             
             # 研修初日取得
-            selector_type = self.selectors['training_start_date']['selector_type'].upper()
-            selector_value = self.selectors['training_start_date']['selector_value']
-            training_date = rows[record_offset].find_element(
-                getattr(By, selector_type), selector_value
-            ).text.strip()
-            applicant_data['training_start_date'] = training_date
-            self.logger.info(f"✅ {self.selectors['training_start_date']['description']}: {training_date}")
+            try:
+                selector_type = self.selectors['training_start_date']['selector_type'].upper()
+                selector_value = self.selectors['training_start_date']['selector_value']
+                training_element = rows[record_offset].find_element(
+                    getattr(By, selector_type), selector_value
+                )
+                
+                # data-value属性から日付を取得
+                training_date = training_element.get_attribute('data-value')
+                if not training_date:
+                    # data-valueが空の場合は「未定」とする
+                    training_date = '未定'
+                
+                applicant_data['training_start_date'] = training_date
+                self.logger.info(f"✅ {self.selectors['training_start_date']['description']}: {training_date}")
+            except Exception as e:
+                self.logger.warning(f"研修日の取得に失敗: {str(e)}")
+                applicant_data['training_start_date'] = '未定'
             
             # 在籍確認取得
             selector_type = self.selectors['zaiseki_ok']['selector_type'].upper()
@@ -131,7 +142,7 @@ class Adoption:
             
             # 3行目の要素を取得（お祝い、パターン判定理由、管理者メモなど）
             self.logger.info("\n【3行目】")
-            for element, key in [('celebration', 'oiwai'), ('pattern_reason', 'pattern_reason'), ('memo', 'memo')]:
+            for element, key in [('celebration', 'oiwai'), ('pattern_reason', 'pattern_reason'), ('remark', 'remark')]:
                 if element in self.selectors:
                     try:
                         element_info = self.selectors[element]
@@ -141,7 +152,7 @@ class Adoption:
                             getattr(By, selector_type), selector_value
                         )
                         
-                        if key == 'pattern_reason' or key == 'memo':
+                        if key == 'pattern_reason' or key == 'remark':
                             # パターン判定理由と備考欄はボタンのテキストを取得
                             value = element_obj.text.strip() if element_obj.text.strip() else ''
                         else:
@@ -166,12 +177,12 @@ class Adoption:
             applicant_data['pattern_reason'] = reason
             self.logger.info(f"DEBUG: adoption.py - パターン判定理由を設定後 -> key: 'pattern_reason', value: '{applicant_data['pattern_reason']}'")
             
-            # 備考欄が設定されていない場合は空文字を設定（memo - ユーザーが入力する備考欄）
-            if 'memo' not in applicant_data:
-                applicant_data['memo'] = ''
-                self.logger.info("備考欄(memo): 未設定のため空文字を設定")
+            # 備考欄が設定されていない場合は空文字を設定（remark - ユーザーが入力する備考欄）
+            if 'remark' not in applicant_data:
+                applicant_data['remark'] = ''
+                self.logger.info("備考欄(remark): 未設定のため空文字を設定")
             else:
-                self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
+                self.logger.info(f"備考欄(remark): {applicant_data['remark']}")
             
             # お祝いフラグが未設定の場合は空文字で初期化
             if 'oiwai' not in applicant_data:
@@ -180,8 +191,11 @@ class Adoption:
             applicant_data['confirm_checkbox'] = ''
             applicant_data['confirm_onoff'] = ''
 
-            # パターン99以外の場合の処理
-            if pattern != 99:
+            # スキップ条件をチェック
+            should_skip = self._should_skip_confirmation_process(applicant_data)
+            
+            # パターン99以外かつスキップ条件に該当しない場合の処理
+            if pattern != 99 and not should_skip:
                 # チェックボックスの操作
                 selector_type = self.selectors['confirm_checkbox']['selector_type'].upper()
                 selector_value = self.selectors['confirm_checkbox']['selector_value']
@@ -202,12 +216,73 @@ class Adoption:
                     applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
                 else:
                     applicant_data['confirm_checkbox'] = 'エラー'
+            elif should_skip:
+                # スキップ条件に該当する場合
+                applicant_data['confirm_checkbox'] = 'スキップ'
+                applicant_data['confirm_onoff'] = 'スキップ（備考欄記載あり）'
+                self.logger.info(f"✅ 確認完了処理をスキップしました")
+            elif pattern == 99:
+                # パターン99の場合（従来通り）
+                self.logger.info(f"パターン99のため確認完了処理をスキップ")
+                applicant_data['confirm_checkbox'] = 'パターン99'
+                applicant_data['confirm_onoff'] = 'パターン99対象外'
 
             return applicant_data
 
         except Exception as e:
             self.logger.error(f"❌ レコード処理でエラー: {str(e)}")
             return None
+
+    def _should_skip_confirmation_process(self, applicant_data):
+        """
+        確認完了処理をスキップすべきかどうかを判定
+        
+        スキップ条件:
+        ①ステータス「採用」+ 研修初日「未定」+ 備考欄に記載あり
+        ②ステータス「採用」+ 研修初日「日付入力あり」+ 備考欄に記載あり  
+        ③ステータス「採用」+ 研修初日「日付入力あり」+ 在籍確認「〇または×」+ 備考欄に記載あり
+        
+        Args:
+            applicant_data (dict): 応募者データ
+            
+        Returns:
+            bool: スキップする場合はTrue
+        """
+        try:
+            status = applicant_data.get('status', '').strip()
+            training_date = applicant_data.get('training_start_date', '').strip()
+            zaiseki = applicant_data.get('zaiseki', '').strip()
+            remark = applicant_data.get('remark', '').strip()
+            
+            # ステータスが「採用」でない場合はスキップしない
+            if status != '採用':
+                return False
+            
+            # 備考欄が空の場合はスキップしない
+            if not remark:
+                return False
+            
+            # 条件①: ステータス「採用」+ 研修初日「未定」+ 備考欄に記載あり
+            if training_date == '未定':
+                self.logger.warning(f"🚫 スキップ条件①に該当: ステータス「{status}」+ 研修初日「{training_date}」+ 備考欄記載あり")
+                return True
+            
+            # 条件②③: 研修初日に日付が入力されている場合
+            if training_date and training_date != '未定' and training_date != '':
+                # 条件③: 在籍確認が「〇」または「×」の場合
+                if zaiseki and (zaiseki == '〇' or '×' in zaiseki):
+                    self.logger.warning(f"🚫 スキップ条件③に該当: ステータス「{status}」+ 研修初日「{training_date}」+ 在籍確認「{zaiseki}」+ 備考欄記載あり")
+                    return True
+                
+                # 条件②: 在籍確認がない場合でも研修日+備考欄があればスキップ
+                self.logger.warning(f"🚫 スキップ条件②に該当: ステータス「{status}」+ 研修初日「{training_date}」+ 備考欄記載あり")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            self.logger.error(f"スキップ条件判定でエラー: {str(e)}")
+            return False
 
     def get_applicant_info(self, rows, record_index):
         """
@@ -270,9 +345,16 @@ class Adoption:
             try:
                 selector_type = self.selectors['training_start_date']['selector_type'].upper()
                 selector_value = self.selectors['training_start_date']['selector_value']
-                training_date = row1.find_element(
+                training_element = row1.find_element(
                     getattr(By, selector_type), selector_value
-                ).text.strip()
+                )
+                
+                # data-value属性から日付を取得
+                training_date = training_element.get_attribute('data-value')
+                if not training_date:
+                    # data-valueが空の場合は「未定」とする
+                    training_date = '未定'
+                
                 applicant_data['training_start_date'] = training_date
                 self.logger.info(f"✅ {self.selectors['training_start_date']['description']}: {training_date}")
             except Exception as e:
@@ -293,29 +375,29 @@ class Adoption:
                     self.logger.warning(f"在籍確認の取得に失敗: {str(e)}")
                     applicant_data['zaiseki'] = ''
             
-            # 備考欄取得（memo - ユーザーが入力するフリーテキスト）
+            # 備考欄取得（remark - ユーザーが入力するフリーテキスト）
             try:
-                if 'memo' in self.selectors:
-                    selector_type = self.selectors['memo']['selector_type'].upper()
-                    selector_value = self.selectors['memo']['selector_value']
+                if 'remark' in self.selectors:
+                    selector_type = self.selectors['remark']['selector_type'].upper()
+                    selector_value = self.selectors['remark']['selector_value']
                     if row_index + 2 < len(rows):  # 3行目が存在する場合
-                        memo_element = rows[row_index + 2].find_element(
+                        remark_element = rows[row_index + 2].find_element(
                             getattr(By, selector_type), selector_value
                         )
                         # ボタン要素からテキスト取得（get_attributeではなく.textを使用）
-                        memo_text = memo_element.text.strip()
-                        applicant_data['memo'] = memo_text
-                        self.logger.info(f"✅ {self.selectors['memo']['description']}(memo): {memo_text}")
+                        remark_text = remark_element.text.strip()
+                        applicant_data['remark'] = remark_text
+                        self.logger.info(f"✅ {self.selectors['remark']['description']}(remark): {remark_text}")
                     else:
-                        applicant_data['memo'] = ''
-                        self.logger.warning("備考欄(memo)取得のための3行目が存在しません")
+                        applicant_data['remark'] = ''
+                        self.logger.warning("備考欄(remark)取得のための3行目が存在しません")
                 else:
-                    applicant_data['memo'] = ''
-                    self.logger.warning("備考欄(memo)のセレクター定義がありません")
+                    applicant_data['remark'] = ''
+                    self.logger.warning("備考欄(remark)のセレクター定義がありません")
             except Exception as e:
-                self.logger.warning(f"備考欄(memo)の取得に失敗: {str(e)}")
+                self.logger.warning(f"備考欄(remark)の取得に失敗: {str(e)}")
                 self.logger.warning(f"エラーの詳細: {traceback.format_exc()}")
-                applicant_data['memo'] = ''
+                applicant_data['remark'] = ''
             
             return applicant_data
             

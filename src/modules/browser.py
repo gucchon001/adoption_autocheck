@@ -66,7 +66,14 @@ class Browser:
         if self.settings.getboolean('BROWSER', 'headless', fallback=True):
             options.add_argument('--headless=new')
         
-        service = Service(ChromeDriverManager().install())
+        # ChromeDriverManagerのパスを修正
+        driver_path = ChromeDriverManager().install()
+        # THIRD_PARTY_NOTICES.chromedriverが返された場合、正しい実行ファイルパスに修正
+        if driver_path.endswith('THIRD_PARTY_NOTICES.chromedriver'):
+            import os
+            driver_path = os.path.join(os.path.dirname(driver_path), 'chromedriver.exe')
+        
+        service = Service(driver_path)
         self.driver = webdriver.Chrome(service=service, options=options)
         self.wait = WebDriverWait(self.driver, 20)
         self.driver.maximize_window()
@@ -192,16 +199,27 @@ class Browser:
                     selectors['search_button']['selector_value']
                 )
                 
+                # 画面上部にスクロールして要素の重なりを避ける
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
+                
                 # 検索ボタンが見えるようにスクロール
                 self.driver.execute_script(
                     "arguments[0].scrollIntoView({block: 'center', behavior: 'smooth'});", 
                     search_button
                 )
-                time.sleep(1.5)  # スクロールが完了するまで待機
+                time.sleep(2)  # スクロール完了を待機
                 
-                # JavaScriptを使用してクリック
-                self.driver.execute_script("arguments[0].click();", search_button)
-                self.logger.info("✅ 検索ボタンをクリックしました")
+                # 要素が他の要素に隠れていないか確認してからクリック
+                try:
+                    # まず通常のクリックを試行
+                    search_button.click()
+                    self.logger.info("✅ 検索ボタンをクリックしました（通常クリック）")
+                except Exception as click_error:
+                    self.logger.warning(f"通常クリックに失敗、JavaScriptクリックを試行: {str(click_error)}")
+                    # JavaScriptを使用してクリック
+                    self.driver.execute_script("arguments[0].click();", search_button)
+                    self.logger.info("✅ 検索ボタンをクリックしました（JavaScriptクリック）")
                 
                 # 検索結果の読み込みを待機
                 time.sleep(3)
@@ -550,28 +568,43 @@ class Browser:
             self.logger.info(f"DEBUG: browser.py - パターン判定結果設定: パターン={pattern}, 理由={reason}")
             
             # 備考欄が設定されていない場合は空文字を設定
-            if 'memo' not in applicant_data:
-                applicant_data['memo'] = ''
-                self.logger.info("備考欄(memo): 未設定のため空文字を設定")
+            if 'remark' not in applicant_data:
+                applicant_data['remark'] = ''
+                self.logger.info("備考欄(remark): 未設定のため空文字を設定")
             else:
-                self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
+                self.logger.info(f"備考欄(remark): {applicant_data['remark']}")
             
-            # チェックボックスをクリック
-            if not adoption.check_single_record(rows, 0):
-                self.logger.warning(f"応募ID: {app_id} のチェックに失敗しました")
-                return False, None
+            # スキップ条件をチェック
+            should_skip = adoption._should_skip_confirmation_process(applicant_data)
             
-            # チェックボックスがクリックされたことを記録
-            applicant_data['confirm_checkbox'] = 'チェック'
-            
-            # 更新ボタンをクリック
-            auto_update = env.get_config_value('BROWSER', 'auto_update', False)
-            if not self._click_update_button(auto_update):
-                self.logger.warning(f"応募ID: {app_id} の更新に失敗しました")
-                return False, None
-            
-            # 更新状態を記録
-            applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
+            if should_skip:
+                # スキップ条件に該当する場合
+                applicant_data['confirm_checkbox'] = 'スキップ'
+                applicant_data['confirm_onoff'] = 'スキップ（備考欄記載あり）'
+                self.logger.info(f"✅ 応募ID: {app_id} はスキップ条件に該当するため、確認完了処理をスキップしました")
+            elif pattern == 99:
+                # パターン99の場合
+                applicant_data['confirm_checkbox'] = 'パターン99'
+                applicant_data['confirm_onoff'] = 'パターン99対象外'
+                self.logger.info(f"応募ID: {app_id} はパターン99のため、確認完了処理をスキップしました")
+            else:
+                # 通常の処理
+                # チェックボックスをクリック
+                if not adoption.check_single_record(rows, 0):
+                    self.logger.warning(f"応募ID: {app_id} のチェックに失敗しました")
+                    return False, None
+                
+                # チェックボックスがクリックされたことを記録
+                applicant_data['confirm_checkbox'] = 'チェック'
+                
+                # 更新ボタンをクリック
+                auto_update = env.get_config_value('BROWSER', 'auto_update', False)
+                if not self._click_update_button(auto_update):
+                    self.logger.warning(f"応募ID: {app_id} の更新に失敗しました")
+                    return False, None
+                
+                # 更新状態を記録
+                applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
             
             # IDキーの統一（application_id → id）
             if 'application_id' in applicant_data and 'id' not in applicant_data:

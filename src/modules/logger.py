@@ -68,7 +68,7 @@ class Logger:
                     applicant.get('pattern', ''),   # パターン
                     applicant.get('pattern_reason', ''),    # パターン判定理由
                     applicant.get('oiwai', ''),     # お祝いフラグ
-                    applicant.get('memo', ''),      # 備考
+                    applicant.get('remark', ''),      # 備考
                     applicant['training_start_date'],  # 研修初日
                     applicant['zaiseki'],   # 在籍確認
                     applicant.get('confirm_checkbox', ''),     # 確認完了チェックボックス
@@ -153,7 +153,7 @@ class Logger:
                     applicant_data.get('pattern', ''),   # パターン
                     applicant_data.get('pattern_reason', ''),    # パターン判定理由
                     applicant_data.get('oiwai', ''),     # お祝いフラグ
-                    applicant_data.get('memo', ''),      # 備考
+                    applicant_data.get('remark', ''),      # 備考
                     applicant_data['training_start_date'],  # 研修初日
                     applicant_data['zaiseki'],   # 在籍確認
                     applicant_data.get('confirm_checkbox', ''),     # 確認完了チェックボックス

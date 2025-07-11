@@ -1,6 +1,6 @@
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
-from ..utils.environment import EnvironmentUtils as env
+from src.utils.environment import EnvironmentUtils as env
 import time
 
 class Search:

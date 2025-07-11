@@ -210,49 +210,50 @@ class ApplicantChecker:
     def check_pattern(self, applicant_data: Dict) -> tuple[int, str]:
         """応募者データのパターンを判定する"""
         now = datetime.now()
-        self.logger.info(f"パターン判定開始: {applicant_data}")
         
         # パターン1の判定（保留/不合格/連絡取れず/辞退/欠席）
         if applicant_data['status'] in ['保留', '不合格', '連絡取れず', '辞退', '欠席']:
             reason = f"ステータス: {applicant_data['status']}"
-            self.logger.info(f"パターン1と判定: {reason}")
-            self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {1}, 理由: {reason}")
+            self.logger.debug(f"[CHECKER] パターン1判定: {reason}")
             return 1, reason
             
         # 採用の場合のパターン判定
         if applicant_data['status'] == '採用':
+            # 備考欄チェック: 採用ステータスで備考欄に記載がある場合はスキップ
+            memo_content = applicant_data.get('memo', '').strip()
+            if memo_content:
+                reason = f"採用ステータスで備考欄に記載あり（備考: {memo_content[:20]}...）"
+                self.logger.debug(f"[CHECKER] パターン99判定（備考欄記載あり）: {reason}")
+                return 99, reason
+            
             # パターン2: 研修日未定
             if applicant_data['training_start_date'] == '未定':
-                self.logger.info("パターン2と判定: 研修日未定")
                 reason = "研修日未定・在籍確認未実施"
-                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {2}, 理由: {reason}")
+                self.logger.debug(f"[CHECKER] パターン2判定: {reason}")
                 return 2, reason
                 
             training_date = self._parse_date(applicant_data['training_start_date'])
             if not training_date:
-                self.logger.info("パターン99と判定: 研修日のパース失敗")
                 reason = "研修日の形式が不正"
-                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {99}, 理由: {reason}")
+                self.logger.debug(f"[CHECKER] パターン99判定: {reason}")
                 return 99, reason
                 
             # パターン3: 実行月以降
             if training_date >= now:
-                self.logger.info("パターン3と判定: 研修日が実行月以降")
                 reason = "研修日が実行月以降・在籍確認未実施"
-                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {3}, 理由: {reason}")
+                self.logger.debug(f"[CHECKER] パターン3判定: {reason}")
                 return 3, reason
                 
             # パターン4: 1ヶ月以上経過
             one_month_ago = now - relativedelta(months=1)
             if training_date <= one_month_ago and applicant_data['zaiseki'] == '〇':
-                self.logger.info("パターン4と判定: 1ヶ月以上経過・在籍確認済み")
                 reason = "研修日から1ヶ月以上経過・在籍確認済み"
-                self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {4}, 理由: {reason}")
+                self.logger.debug(f"[CHECKER] パターン4判定: {reason}")
                 return 4, reason
         
-        self.logger.info("パターン99と判定: 該当するパターンなし")
-        self.logger.info(f"DEBUG: checker.py - パターン判定結果 -> パターン: {99}, 理由: {'該当するパターンなし'}")
-        return 99, "該当するパターンなし"
+        reason = "該当するパターンなし"
+        self.logger.debug(f"[CHECKER] パターン99判定: {reason}")
+        return 99, reason
 
     @staticmethod
     def format_check_result(reason: str) -> str:

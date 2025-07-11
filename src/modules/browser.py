@@ -8,9 +8,9 @@ import configparser
 import time
 import pandas as pd
 from selenium.webdriver.support.select import Select
-from ..utils.environment import EnvironmentUtils as env
-from .adoption import Adoption
-from ..utils.logging_config import get_logger
+from src.utils.environment import EnvironmentUtils as env
+from src.modules.adoption import Adoption
+from src.utils.logging_config import get_logger
 import traceback
 
 class Browser:
@@ -405,9 +405,9 @@ class Browser:
                 
                 # ステップ2: 収集した応募IDを一つずつ処理
                 for app_id in application_ids:
-                    result, applicant_data = self._process_single_application_id(app_id, checker, env, adoption)
-                    if result and applicant_data:
-                        all_processed_applicants.append(applicant_data)
+                    result, applicant_data_list = self._process_single_application_id(app_id, checker, env, adoption)
+                    if result and applicant_data_list:
+                        all_processed_applicants.extend(applicant_data_list)
                 
                 # ステップ3: 初期検索条件に戻る（応募IDを指定せずに検索）
                 if not self._search_by_application_id():
@@ -471,29 +471,49 @@ class Browser:
             # 処理対象の応募IDを収集
             application_ids = []
             
+            self.logger.info(f"[DEBUG] レコード数: {record_count}, 行数: {len(rows)}")
+            
             for record_index in range(record_count):
                 try:
+                    self.logger.info(f"[DEBUG] レコード {record_index + 1}/{record_count} の処理を開始")
+                    
                     # get_applicant_info メソッドを使用して応募者データを取得（チェックボックスはクリックしない）
                     applicant_data = adoption.get_applicant_info(rows, record_index)
                     
                     # 応募者データが取得できた場合
                     if applicant_data and 'status' in applicant_data:
+                        app_id = applicant_data.get('application_id')
+                        self.logger.info(f"[DEBUG] 応募ID: {app_id}")
+                        self.logger.info(f"[DEBUG] 取得データ: {applicant_data}")
+                        
                         # パターン判定を行う
                         pattern, reason = checker.check_pattern(applicant_data)
+                        self.logger.info(f"[DEBUG] パターン判定結果: パターン={pattern}, 理由={reason}")
                         
-                        # パターン1〜4が対象
-                        should_check = 1 <= pattern <= 4
+                        # パターン1〜4が対象 + パターン99は設定に応じて対象
+                        include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+                        should_check = (1 <= pattern <= 4) or (pattern == 99 and include_pattern_99)
+                        self.logger.info(f"[DEBUG] チェック対象判定: {should_check} (パターン{pattern}, include_pattern_99={include_pattern_99})")
                         
                         if should_check:
-                            app_id = applicant_data.get('application_id')
                             if app_id:
                                 application_ids.append(app_id)
                                 self.logger.info(f"チェック対象の応募ID: {app_id} を追加しました (パターン{pattern}: {reason})")
+                            else:
+                                self.logger.warning(f"[DEBUG] 応募IDが取得できませんでした")
+                        else:
+                            self.logger.info(f"[DEBUG] パターン{pattern}のためスキップ: {app_id}")
+                    else:
+                        self.logger.warning(f"[DEBUG] レコード {record_index} の応募者データ取得に失敗")
+                        if applicant_data:
+                            self.logger.warning(f"[DEBUG] データ内容: {applicant_data}")
+                        
                 except Exception as e:
                     self.logger.error(f"レコード {record_index} の処理でエラー: {str(e)}")
                     traceback.print_exc()  # スタックトレースを出力
                     continue
             
+            self.logger.info(f"[DEBUG] 最終的に収集した応募ID数: {len(application_ids)}")
             return application_ids
             
         except Exception as e:
@@ -512,8 +532,10 @@ class Browser:
             adoption: Adoptionクラスのインスタンス
             
         Returns:
-            bool: 処理に成功した場合はTrue、失敗した場合はFalse
+            tuple: (処理成功可否, 処理した応募者データのリスト)
         """
+        processed_applicants = []
+        
         try:
             self.logger.info(f"応募ID: {app_id} の処理を開始")
             
@@ -537,59 +559,115 @@ class Browser:
             )
             rows = table.find_elements(By.CSS_SELECTOR, "tbody > tr")
             
-            # 応募者データを取得（チェックボックスはまだクリックしない）
-            applicant_data = adoption.get_applicant_info(rows, 0)
-            if not applicant_data:
-                self.logger.warning(f"応募ID: {app_id} のデータ取得に失敗しました")
-                return False, None
+            self.logger.info(f"応募ID: {app_id} の検索結果: {record_count}レコード見つかりました")
             
-            # パターン判定を行う
-            pattern, reason = checker.check_pattern(applicant_data)
-            applicant_data['pattern'] = str(pattern)
-            applicant_data['pattern_reason'] = reason
-            self.logger.info(f"DEBUG: browser.py - パターン判定結果設定: パターン={pattern}, 理由={reason}")
+            # 変更があったかどうかのフラグ
+            changes_made = False
             
-            # 備考欄が設定されていない場合は空文字を設定
-            if 'memo' not in applicant_data:
-                applicant_data['memo'] = ''
-                self.logger.info("備考欄(memo): 未設定のため空文字を設定")
-            else:
-                self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
-            
-            # チェックボックスをクリック
-            if not adoption.check_single_record(rows, 0):
-                self.logger.warning(f"応募ID: {app_id} のチェックに失敗しました")
-                return False, None
-            
-            # チェックボックスがクリックされたことを記録
-            applicant_data['confirm_checkbox'] = 'チェック'
-            
-            # 更新ボタンをクリック
-            auto_update = env.get_config_value('BROWSER', 'auto_update', False)
-            if not self._click_update_button(auto_update):
-                self.logger.warning(f"応募ID: {app_id} の更新に失敗しました")
-                return False, None
-            
-            # 更新状態を記録
-            applicant_data['confirm_onoff'] = '更新' if auto_update else '更新キャンセル'
-            
-            # IDキーの統一（application_id → id）
-            if 'application_id' in applicant_data and 'id' not in applicant_data:
-                applicant_data['id'] = applicant_data['application_id']
-            
-            # ログに記録
-            if hasattr(self, 'logger_instance') and self.logger_instance:
+            # 全てのレコードを処理
+            for record_index in range(record_count):
                 try:
-                    log_success = self.logger_instance.log_applicants([applicant_data])
-                    if log_success:
-                        self.logger.info(f"応募ID: {app_id} のデータをログに記録しました")
+                    self.logger.info(f"応募ID: {app_id} のレコード #{record_index} の処理を開始")
+                    
+                    # 応募者データを取得（チェックボックスはまだクリックしない）
+                    applicant_data = adoption.get_applicant_info(rows, record_index)
+                    if not applicant_data:
+                        self.logger.warning(f"応募ID: {app_id} レコード #{record_index} のデータ取得に失敗しました")
+                        continue
+                    
+                    # パターン判定を行う
+                    pattern, reason = checker.check_pattern(applicant_data)
+                    applicant_data['pattern'] = str(pattern)
+                    applicant_data['pattern_reason'] = reason
+                    self.logger.info(f"DEBUG: browser.py - パターン判定結果設定: パターン={pattern}, 理由={reason}")
+                    
+                    # 備考欄が設定されていない場合は空文字を設定
+                    if 'memo' not in applicant_data:
+                        applicant_data['memo'] = ''
+                        self.logger.info("備考欄(memo): 未設定のため空文字を設定")
+                    else:
+                        self.logger.info(f"備考欄(memo): {applicant_data['memo']}")
+                    
+                    # パターン判定に基づいてチェックボックスをクリック
+                    if 1 <= pattern <= 4:  # パターン1〜4が対象
+                        # チェックボックスをクリック
+                        if adoption.check_single_record(rows, record_index):
+                            # チェックボックスがクリックされたことを記録
+                            applicant_data['confirm_checkbox'] = 'チェック'
+                            changes_made = True
+                            self.logger.info(f"応募ID: {app_id} レコード #{record_index} のチェックボックスをクリックしました")
+                        else:
+                            applicant_data['confirm_checkbox'] = 'エラー'
+                            self.logger.warning(f"応募ID: {app_id} レコード #{record_index} のチェックに失敗しました")
+                    else:
+                        applicant_data['confirm_checkbox'] = 'スキップ'
+                        self.logger.info(f"応募ID: {app_id} レコード #{record_index} はパターン{pattern}のためスキップしました")
+                    
+                    # IDキーの統一（application_id → id）
+                    if 'application_id' in applicant_data and 'id' not in applicant_data:
+                        applicant_data['id'] = applicant_data['application_id']
+                    
+                    processed_applicants.append(applicant_data)
+                    
+                except Exception as record_error:
+                    self.logger.error(f"応募ID: {app_id} レコード #{record_index} の処理でエラー: {str(record_error)}")
+                    continue
+            
+            # 変更があった場合のみ更新ボタンをクリック
+            if changes_made:
+                auto_update = env.get_config_value('BROWSER', 'auto_update', False)
+                if not self._click_update_button(auto_update):
+                    self.logger.warning(f"応募ID: {app_id} の更新に失敗しました")
+                    return False, None
+                
+                # 更新状態を記録
+                update_status = '更新' if auto_update else '更新キャンセル'
+                for applicant_data in processed_applicants:
+                    applicant_data['confirm_onoff'] = update_status
+            else:
+                # 変更がなかった場合
+                for applicant_data in processed_applicants:
+                    applicant_data['confirm_onoff'] = 'スキップ'
+            
+            # ログに記録（個別レコードごとに記録）
+            if hasattr(self, 'logger_instance') and self.logger_instance and processed_applicants:
+                try:
+                    self.logger.info(f"BROWSER_DEBUG: 応募ID: {app_id} の記録処理開始 - 件数: {len(processed_applicants)}")
+                    
+                    # 各データのパターンを確認
+                    for i, applicant_data in enumerate(processed_applicants):
+                        pattern = applicant_data.get('pattern', '未設定')
+                        self.logger.info(f"BROWSER_DEBUG: [{i+1}] パターン: {pattern} - 応募ID: {applicant_data.get('id', '不明')}")
+                    
+                    log_success_count = 0
+                    for applicant_data in processed_applicants:
+                        pattern = applicant_data.get('pattern', '未設定')
+                        app_id_inner = applicant_data.get('id', '不明')
+                        
+                        self.logger.info(f"BROWSER_DEBUG: log_single_applicant呼び出し - 応募ID: {app_id_inner}, パターン: {pattern}")
+                        
+                        if self.logger_instance.log_single_applicant(applicant_data):
+                            log_success_count += 1
+                            self.logger.info(f"BROWSER_DEBUG: 記録成功 - 応募ID: {app_id_inner}, パターン: {pattern}")
+                        else:
+                            self.logger.info(f"BROWSER_DEBUG: 記録失敗 - 応募ID: {app_id_inner}, パターン: {pattern}")
+                    
+                    if log_success_count > 0:
+                        self.logger.info(f"応募ID: {app_id} の{log_success_count}件のデータをログに記録しました")
                     else:
                         self.logger.warning(f"応募ID: {app_id} のデータのログ記録に失敗しました")
                 except Exception as log_error:
                     self.logger.error(f"ログ記録中にエラーが発生: {str(log_error)}")
+            else:
+                if not hasattr(self, 'logger_instance'):
+                    self.logger.warning(f"BROWSER_DEBUG: logger_instanceが存在しません")
+                elif not self.logger_instance:
+                    self.logger.warning(f"BROWSER_DEBUG: logger_instanceがNoneです")
+                elif not processed_applicants:
+                    self.logger.warning(f"BROWSER_DEBUG: processed_applicantsが空です")
             
-            self.logger.info(f"応募ID: {app_id} の処理が完了しました")
-            return True, applicant_data
+            self.logger.info(f"応募ID: {app_id} の処理が完了しました（処理件数: {len(processed_applicants)}）")
+            return True, processed_applicants
             
         except Exception as e:
             self.logger.error(f"❌ 応募ID: {app_id} の処理でエラー: {str(e)}")

@@ -7,8 +7,8 @@ from datetime import datetime
 import json
 
 from .environment import EnvironmentUtils as env
-from ..utils.logging_config import get_logger
-from ..modules.scheduler import Scheduler
+from src.utils.logging_config import get_logger
+from src.modules.scheduler import Scheduler
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,22 @@ class Notifier:
                     }
                 ]
             })
+
+            # エラー時の処理
+            if status == "error" and error_message:
+                # エラーメッセージが長い場合は切り詰める
+                max_length = 2000
+                display_error = error_message
+                if len(error_message) > max_length:
+                    display_error = error_message[:max_length] + "...\n(メッセージが切り詰められました)"
+                
+                blocks.append({
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"🚨 *エラー詳細*\n```\n{display_error}\n```"
+                    }
+                })
 
             # 成功時の統計情報
             if status == "success" and stats:

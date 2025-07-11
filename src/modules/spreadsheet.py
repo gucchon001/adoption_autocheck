@@ -3,7 +3,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 from typing import List, Dict, Optional
-from ..utils.environment import EnvironmentUtils as env
+from src.utils.environment import EnvironmentUtils as env
 
 class SpreadSheet:
     def __init__(self, credentials_path: Path, spreadsheet_key: str):

@@ -1,7 +1,7 @@
 from functools import wraps
 import time
 from typing import Callable, Any
-from ..utils.logging_config import get_logger
+from src.utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 

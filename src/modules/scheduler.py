@@ -1,6 +1,6 @@
 from datetime import datetime
 import time
-from ..utils.environment import EnvironmentUtils as env
+from src.utils.environment import EnvironmentUtils as env
 
 class Scheduler:
     def __init__(self, time1, time2):

@@ -16,15 +16,19 @@
    ヘッドレスモード対応とし、検索条件入力やステータス取得を自動化します。
 
 3. **応募者情報のチェック**  
-   - 設定された各パターン（1〜4）に合致する応募者の詳細情報を取得し、必要なフラグを判定します。  
+   - 設定された各パターン（1〜4、99）に合致する応募者の詳細情報を取得し、必要なフラグを判定します。  
    - 判定ロジックは `checker.py` で行います。
-   - パターン1〜4はすべてチェック対象となり、チェックボックスがクリックされます。
-   - パターン99（対象外）はチェックボックスがクリックされません。
+   - パターン1〜4は常にチェック対象となり、チェックボックスがクリックされます。
+   - **パターン99は`include_pattern_99`設定に応じて処理対象になります**：
+     - `include_pattern_99 = true`: パターン99もチェック対象となり、チェックボックスがクリックされます
+     - `include_pattern_99 = false`: パターン99はスキップされ、チェックボックスがクリックされません
 
 4. **スプレッドシートへの記録**  
    - 取得結果を「ログシート」に書き込みます。  
    - 書き込み時に不要（パターン99など）があればフィルタリングして出力対象を調整します。
-   - パターン99を含めるかどうかは `[LOGGING] include_pattern_99` 設定で制御します。
+   - **パターン99の記録は `[LOGGING] include_pattern_99` 設定で制御されます**：
+     - `include_pattern_99 = true`: パターン99もスプレッドシートに記録されます
+     - `include_pattern_99 = false`: パターン99はスプレッドシートに記録されません
 
 5. **Slack通知**  
    - 結果サマリ（統計情報、各パターン件数）をBlock Kit形式で通知します。  
@@ -40,46 +44,65 @@
 ## 2. システム構成
 
 ### 2.1 ディレクトリ構造
+```
 project_root/
 ├── src/
-│ ├── main.py # メインスクリプト(エントリーポイント)
-│ ├── modules/
-│ │ ├── browser.py # Selenium/ブラウザ操作
-│ │ ├── checker.py # 応募者情報のチェック判定
-│ │ ├── login.py # ログイン処理
-│ │ ├── logger.py # スプレッドシートへのログ記録
-│ │ ├── scheduler.py # スケジューリング実行
-│ │ ├── search.py # 検索処理
-│ │ └── spreadsheet.py # スプレッドシート操作
-│ └── utils/
-│ ├── environment.py # 環境設定（settings.ini 等）
-│ ├── notifications.py # Slack通知処理
-│ └── logging_config.py # ログ設定
+│   ├── main.py                 # メインスクリプト(エントリーポイント)
+│   ├── modules/
+│   │   ├── browser.py          # Selenium/ブラウザ操作
+│   │   ├── checker.py          # 応募者情報のチェック判定
+│   │   ├── login.py            # ログイン処理
+│   │   ├── logger.py           # スプレッドシートへのログ記録
+│   │   ├── scheduler.py        # スケジューリング実行
+│   │   ├── search.py           # 検索処理
+│   │   ├── adoption.py         # 応募者データ処理
+│   │   └── spreadsheet.py      # スプレッドシート操作
+│   └── utils/
+│       ├── environment.py      # 環境設定（settings.ini 等）
+│       ├── notifications.py    # Slack通知処理
+│       ├── logging_config.py   # ログ設定
+│       ├── helpers.py          # ヘルパー関数
+│       ├── retry_decorator.py  # リトライデコレータ
+│       └── path_generator.py   # パス生成ユーティリティ
 ├── config/
-│ ├── settings.ini # システム設定(エンドユーザ設定想定)
-│ ├── selectors.csv # 要素セレクタ定義
-│ ├── judge_list.csv # 判定条件定義
-│ └── data.json # Google API認証
-├── logs/ # ログファイル格納先
-│ └── log.txt
-├── tests/ # テストコード
-│ ├── init.py
-│ ├── test_browser.py
-│ ├── test_checker.py
-│ └── test_logger.py
-├── docs/ # ドキュメント
-│ ├── spec.md # 仕様書 (本ファイル)
-│ └── setup.md # セットアップガイド
-├── requirements.txt # Python依存パッケージ記載
-├── README.md # プロジェクト説明
-└── .gitignore # Git除外設定
+│   ├── settings.ini            # システム設定(エンドユーザ設定想定)
+│   ├── selectors.csv           # 要素セレクタ定義
+│   ├── judge_list.csv          # 判定条件定義
+│   └── data.json               # Google API認証
+├── logs/                       # ログファイル格納先
+│   └── app_YYYYMMDD.log
+├── tests/                      # テストコード
+│   ├── __init__.py
+│   ├── conftest.py
+│   ├── test_browser.py
+│   └── test_spreadsheet.py
+├── docs/                       # ドキュメント
+│   ├── spec.md                 # 仕様書 (本ファイル)
+│   ├── system.md               # システム構成図
+│   ├── data_flow.md            # データフロー図
+│   ├── class_diagram.md        # クラス図
+│   ├── sequence.md             # シーケンス図
+│   ├── activity.md             # アクティビティ図
+│   └── state.md                # 状態遷移図
+├── requirements.txt            # Python依存パッケージ記載
+├── run.bat                     # 実行バッチファイル
+├── run_dev.bat                 # 開発用実行バッチファイル
+├── README.md                   # プロジェクト説明
+└── .gitignore                  # Git除外設定
+```
 
 ### 2.2 外部連携
 - Google Spreadsheet: 結果出力先
 - Slack: 通知送信先
 - 求人サービス: データ取得元
 
-### 2.2 設定ファイル (settings.ini)
+### 2.3 インポート構造
+**システムでは絶対インポートを使用しています**：
+- `from src.modules.browser import Browser`
+- `from src.utils.environment import EnvironmentUtils`
+- 相対インポート（`from ..modules` 等）は使用していません
+
+### 2.4 設定ファイル (settings.ini)
 ```ini
 [SERVICE]
 domain = www.juku.st
@@ -103,13 +126,23 @@ repeat_until_empty = true
 
 [LOGGING]
 # パターン99(対象外)をログや通知で含めるか
-include_pattern_99 = false
+# true: パターン99も処理対象・記録対象になる
+# false: パターン99はスキップされ、記録されない
+include_pattern_99 = true
 
 [SEARCH]
 # 提出ステータス (未提出/提出中/提出済など)
 submit_status = 2
 # 提出期限 (""=指定なし, 1=今月末, 2=期限超過)
 submit_deadline = ""
+
+[SPREADSHEET]
+# スプレッドシートキー
+spreadsheet_key = your_spreadsheet_key
+# 認証情報ファイルパス
+credentials_path = config/data.json
+# シート名
+sheet_name = exe_logsheet
 
 [log_settings]
 # ログサイズを一定量でローテーションし、古いファイルをバックアップ
@@ -156,8 +189,11 @@ log_dir = logs
    - 管理者メモ(admin_memo)の確認
    - パターン判定理由(pattern_reason)の確認（ボタン要素）
    - 備考欄(memo)の確認（ボタン要素）
-6. 結果の記録（スプレッドシート）
-7. 結果の通知（Slack）
+6. **パターン判定に基づく処理対象の決定**：
+   - パターン1〜4: 常に処理対象
+   - パターン99: `include_pattern_99`設定に応じて処理対象を決定
+7. 結果の記録（スプレッドシート）
+8. 結果の通知（Slack）
 
 ### 3.2 チェック条件
 以下の条件に合致する応募者を自動チェック:
@@ -192,6 +228,20 @@ log_dir = logs
      - 「欠席」
    - 採用お祝い未送信（空白）
    - 管理者メモ(admin_memo)未記入（空白）
+
+3. **対象外ケース（パターン99）**:
+   - 上記パターン1〜4の条件に該当しない
+   - **処理対象は`include_pattern_99`設定により決定**:
+     - `include_pattern_99 = true`: チェックボックスがクリックされ、スプレッドシートに記録される
+     - `include_pattern_99 = false`: スキップされ、チェックボックスがクリックされない
+
+### 3.3 処理対象判定ロジック（browser.py）
+```python
+# パターン1〜4は常に処理対象
+# パターン99は設定に応じて処理対象を決定
+include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+should_check = (1 <= pattern <= 4) or (pattern == 99 and include_pattern_99)
+```
 
 ### 3.3 設定項目
 | 項目 | 説明 | 形式 |
@@ -368,7 +418,9 @@ log_dir = logs
 
 5. **パターン99（対象外）**  
    - 上記条件に該当しない。  
-   - `[LOGGING] include_pattern_99` がfalseだと出力/通知から除外。
+   - **処理・記録は設定により制御**：
+     - `include_pattern_99 = true`: チェック対象となり、スプレッドシートに記録される
+     - `include_pattern_99 = false`: スキップされ、出力/通知から除外される
 
 ---
 

@@ -1,8 +1,8 @@
 from datetime import datetime
 from typing import List, Dict
-from ..utils.environment import EnvironmentUtils as env
+from src.utils.environment import EnvironmentUtils as env
 import traceback
-from ..utils.logging_config import get_logger
+from src.utils.logging_config import get_logger
 import gspread
 from google.oauth2 import service_account
 
@@ -41,7 +41,7 @@ class Logger:
             # パターン99の制御設定を読み込み
             include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
             
-            # パターン99のフィルタリング
+            # パターン99のフィルタリング（文字列比較）
             filtered_data = [
                 data for data in applicants_data
                 if data.get('pattern') != '99' or include_pattern_99
@@ -117,7 +117,12 @@ class Logger:
             bool: 記録成功時True、失敗時False
         """
         try:
-            self.logger.info(f"\n=== 応募ID: {applicant_data.get('id', '不明')} のログ記録処理開始 ===")
+            app_id = applicant_data.get('id', '不明')
+            pattern = applicant_data.get('pattern', '未設定')
+            
+            # 必ず出力されるデバッグ情報
+            self.logger.info(f"\n=== 応募ID: {app_id} のログ記録処理開始 ===")
+            self.logger.info(f"STEP1: 受信データ確認 - パターン: {pattern} (型: {type(pattern)})")
             
             # スプレッドシートの接続確認
             if not self.spreadsheet or not hasattr(self.spreadsheet, 'sheet') or self.spreadsheet.sheet is None:
@@ -126,11 +131,22 @@ class Logger:
             
             # パターン99の制御設定を読み込み
             include_pattern_99 = env.get_config_value('LOGGING', 'include_pattern_99', False)
+            self.logger.info(f"STEP2: 設定確認 - include_pattern_99: {include_pattern_99} (型: {type(include_pattern_99)})")
             
-            # パターン99の場合はスキップ
+            # デバッグ: パターン99の設定値と判定を出力
+            if applicant_data.get('pattern') == '99':
+                self.logger.info(f"STEP3: パターン99検出 - 応募ID: {applicant_data['id']}")
+                self.logger.info(f"  - include_pattern_99設定値: {include_pattern_99} (型: {type(include_pattern_99)})")
+                self.logger.info(f"  - パターン値: {applicant_data.get('pattern')} (型: {type(applicant_data.get('pattern'))})")
+            
+            # パターン99の場合はスキップ（文字列比較）
             if applicant_data.get('pattern') == '99' and not include_pattern_99:
-                self.logger.info("パターン99のため記録をスキップします")
+                self.logger.info("STEP4: パターン99のため記録をスキップします")
                 return True
+            elif applicant_data.get('pattern') == '99' and include_pattern_99:
+                self.logger.info("STEP4: パターン99ですが、include_pattern_99=Trueのため記録を続行します")
+            else:
+                self.logger.info(f"STEP4: パターン{pattern}のため記録を続行します")
                 
             # 現在の日時を取得
             now = datetime.now()
